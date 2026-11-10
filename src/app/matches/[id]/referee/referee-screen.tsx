@@ -1,5 +1,6 @@
 "use client";
 
+import { PageLoader } from "@/components/page-loader";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { TEAM_NAMES } from "@/components/balance-meter";
@@ -22,7 +23,7 @@ export function RefereeScreen({ params }: { params: Promise<{ id: string }> }) {
   const { userId, players, matches } = useStore();
   const match = matches.find((m) => m.id === id);
 
-  if (!hydrated) return <div className="mx-auto max-w-3xl px-4 py-10" aria-busy="true" />;
+  if (!hydrated) return <PageLoader label="Loading referee view" />;
 
   if (!match || match.refereeId !== userId || !userId) {
     return (
