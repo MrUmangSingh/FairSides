@@ -1,5 +1,6 @@
 "use client";
 
+import { PageLoader } from "@/components/page-loader";
 import Link from "next/link";
 import { useState } from "react";
 import { AccountPanel } from "@/components/account";
@@ -34,7 +35,7 @@ export function ProfileScreen() {
   const hydrated = useHydrated();
   const { userId, players, cloud, signedIn } = useStore();
   const [revealed, setRevealed] = useState(false);
-  if (!hydrated) return <div className="mx-auto max-w-3xl px-5 py-10" aria-busy="true" />;
+  if (!hydrated) return <PageLoader label="Loading your profile" />;
   if (cloud && !signedIn) return <SignIn />;
 
   const me = userId ? players[userId] : null;

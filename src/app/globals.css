@@ -551,12 +551,37 @@
     opacity: 0.55;
   }
 }
+.loader-compact .loader-orbit {
+  transform: scale(0.72);
+}
+
+/* Button spinner: a chalk ring with a glowing arc. */
+.spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: spin 700ms linear infinite;
+  vertical-align: -0.15em;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .loader-glow,
   .loader-dot,
   .loader-label {
     animation: none !important;
+  }
+  /* A spinner that doesn't turn still needs to read as "working": slow it right down instead. */
+  .spinner {
+    animation-duration: 2.4s !important;
   }
   .loader-dot {
     transform: translateX(-0.9rem);

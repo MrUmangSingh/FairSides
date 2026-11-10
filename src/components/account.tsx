@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
+import { Spinner } from "@/components/page-loader";
 import { tierColor } from "@/components/player-card";
 import { takeAuthError } from "@/lib/cloud";
 import { ovrFor } from "@/lib/domain/ratings";
@@ -106,7 +107,7 @@ export function AccountPanel({ readRedirect = false, compact = false }: { readRe
           setBusy(false);
         }}
       >
-        <GoogleMark />
+        {busy ? <Spinner /> : <GoogleMark />}
         {busy ? "Opening Google…" : "Connect with Google"}
       </button>
       {bounce ? (
