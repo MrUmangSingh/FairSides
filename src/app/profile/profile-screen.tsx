@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { AccountPanel } from "@/components/account";
 import { PlayerCard } from "@/components/player-card";
 import { SignIn } from "@/components/sign-in";
 import { ovrFor } from "@/lib/domain/ratings";
@@ -119,6 +120,11 @@ function ProfileForm({
           player={{ name, stats, gk: keeps ? gk : 35, primaryPos, secondaryPos: secondaryPos && secondaryPos !== primaryPos ? secondaryPos : null, foot, canGk: keeps, playstyle }}
         />
         <p className="field-hint text-center">Your card updates as you move the sliders.</p>
+        {cloud ? (
+          <div className="mt-6">
+            <AccountPanel readRedirect />
+          </div>
+        ) : null}
       </aside>
       <div className="min-w-0">
       <h1 className="text-3xl sm:text-4xl">{me ? "Your player profile" : "Create your player profile"}</h1>

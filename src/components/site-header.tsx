@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AccountMenu } from "@/components/account";
 import { useStore } from "@/lib/store";
 
 export function SiteHeader() {
@@ -24,9 +25,13 @@ export function SiteHeader() {
         <Link href="/matches/new" className="hidden rounded px-2 py-2 hover:underline underline-offset-4 sm:block">
           Create match
         </Link>
-        <Link href="/profile" className="btn btn-line btn-sm">
-          {me ? me.name : cloud && ready && !signedIn ? "Sign in" : "Create profile"}
-        </Link>
+        {me ? (
+          <AccountMenu me={me} />
+        ) : (
+          <Link href="/profile" className="btn btn-line btn-sm">
+            {cloud && ready && !signedIn ? "Sign in" : "Create profile"}
+          </Link>
+        )}
       </nav>
       </div>
     </header>

@@ -19,11 +19,14 @@ function point(i: number, radius: number): [number, number] {
 const ring = (scale: number) =>
   STAT_KEYS.map((_, i) => point(i, R * scale).map((n) => n.toFixed(1)).join(",")).join(" ");
 
+/** Gold for the best, green for good, blue for the rest. */
+export const tierColor = (overall: number) => (overall >= 80 ? "#ffd980" : overall >= 65 ? "#46f0a0" : "#8fd0ff");
+
 /** The card a player gets for their profile. It leans toward the pointer. */
 export function PlayerCard({ player, className = "" }: { player: CardPlayer; className?: string }) {
   const el = useRef<HTMLDivElement>(null);
   const overall = Math.round(ovrFor(player.stats, player.gk, player.primaryPos));
-  const tier = overall >= 80 ? "#ffd980" : overall >= 65 ? "#46f0a0" : "#8fd0ff";
+  const tier = tierColor(overall);
   const shape = STAT_KEYS.map((key, i) =>
     point(i, R * Math.max(0.08, player.stats[key] / 99))
       .map((n) => n.toFixed(1))

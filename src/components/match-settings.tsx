@@ -4,10 +4,8 @@ import { useState } from "react";
 import { Field, SideStepper, placesHint } from "@/components/form-bits";
 import { MAX_PLACES, squadMoves } from "@/lib/domain/squad";
 import type { Match, Player } from "@/lib/domain/types";
+import { formatList as list } from "@/lib/format";
 import { actions } from "@/lib/store";
-
-const list = (names: string[]) =>
-  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
 /**
  * The host's form for changing a match after creating it. Mounted only while

@@ -69,8 +69,12 @@ Authentication → Sign In / Providers:
   scorer, yellow and red cards (a second yellow sends the player off), and a list of events to
   correct mistakes. Everyone sees the live score, scorers and cards on the match page. Only the
   referee can write these; see `supabase/migrations/0003_referee.sql`.
+- **Editing a match (done):** the host's Edit match panel changes the size (players per side and
+  total places) while the teams are open, and the name, venue, kick-off, fee and who can join at
+  any time. Fewer places send the latest to join to the front of the waitlist (never the host);
+  more places move the waitlist up. Each change is listed in the host changes.
 - **Not done from the plan's Phase 2 list:** dragging players in the 3D view (the editor below it
-  does the moving), transferring the host role, editing match details after creating.
+  does the moving), transferring the host role.
 - **Next, Phase 4:** advanced mode, match results, peer ratings, Verified badge, reliability score.
 
 ## Where the code departs from the plan

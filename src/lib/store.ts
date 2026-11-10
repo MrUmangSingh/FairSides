@@ -6,7 +6,7 @@ import { SAMPLE_PLAYERS } from "./domain/samples";
 import { ovr, withAdjustment } from "./domain/ratings";
 import { STOPPED, matchMinute, pauseClock, startClock, summarise, tallyOf } from "./domain/referee";
 import { MAX_PLACES, MAX_SIDE, MIN_SIDE, fitSquad } from "./domain/squad";
-import { formatFee, formatWhen } from "./format";
+import { formatFee, formatList, formatWhen } from "./format";
 import type {
   Adjustment,
   EventKind,
@@ -43,6 +43,8 @@ export interface State {
   cloud: boolean;
   /** Cloud only: someone is signed in (they may not have made a profile yet). */
   signedIn: boolean;
+  /** Cloud only: how the signed-in person got in (guest or Google). */
+  account: cloud.Account | null;
   /** False until the first load from the database has finished. */
   ready: boolean;
   /** The last thing that failed to save, in plain words. */
@@ -55,6 +57,7 @@ const EMPTY: State = {
   matches: [],
   cloud: CLOUD,
   signedIn: false,
+  account: null,
   ready: !CLOUD,
   error: null,
 };
@@ -149,6 +152,7 @@ async function refresh() {
       matches: snap.matches,
       cloud: true,
       signedIn: Boolean(snap.authId),
+      account: snap.account,
       ready: true,
       error: cache.error,
     });
@@ -338,7 +342,16 @@ export const actions = {
 
   signOut() {
     if (CLOUD) send(cloud.supabase().auth.signOut());
-    write({ ...read(), userId: null, signedIn: false });
+    write({ ...read(), userId: null, signedIn: false, account: null });
+  },
+
+  /** Cloud only: links Google to the signed-in guest. The browser leaves for Google on success. */
+  async connectGoogle() {
+    try {
+      await cloud.linkGoogle(`${window.location.origin}/profile`);
+    } catch (e) {
+      write({ ...read(), error: `Could not connect Google: ${message(e)}` });
+    }
   },
 
   clearError() {
@@ -585,8 +598,8 @@ export const actions = {
       const moved = next.participants.filter((p, i) => p !== m.participants[i]);
       const names = (st: Participant["status"]) =>
         moved.filter((p) => p.status === st).map((p) => players[p.userId]?.name ?? "a player");
-      if (names("waitlist").length) said.push(`moved ${names("waitlist").join(", ")} to the waitlist`);
-      if (names("joined").length) said.push(`gave ${names("joined").join(", ")} a place from the waitlist`);
+      if (names("waitlist").length) said.push(`moved ${formatList(names("waitlist"))} to the waitlist`);
+      if (names("joined").length) said.push(`gave ${formatList(names("joined"))} a place from the waitlist`);
       if (next.title !== m.title) said.push(`renamed it "${next.title}"`);
       if (next.venue !== m.venue) said.push(`moved it to ${next.venue}`);
       if (next.datetime !== m.datetime) said.push(`moved kick-off to ${formatWhen(next.datetime)}`);

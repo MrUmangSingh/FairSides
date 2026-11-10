@@ -287,6 +287,85 @@
     background: var(--color-chalk);
     color: var(--color-turf-deep);
   }
+
+  /* White Google button: the one place we leave the chalk palette, so it reads as Google. */
+  .btn-google {
+    background: #fff;
+    border-color: #fff;
+    color: #1f1f1f;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 12px 36px -12px rgb(255 255 255 / 0.45);
+  }
+  .btn-google:hover {
+    background: #f1f3f4;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.2), 0 14px 44px -10px rgb(255 255 255 / 0.6);
+  }
+
+  .account-panel {
+    border-radius: 16px;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    background: linear-gradient(160deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.015));
+    backdrop-filter: blur(14px);
+  }
+  .account-panel-guest {
+    border-color: color-mix(in srgb, var(--color-warn) 30%, transparent);
+    background:
+      radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--color-warn) 12%, transparent), transparent 60%),
+      linear-gradient(160deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.015));
+  }
+
+  .account-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 2.5rem;
+    padding: 0 0.75rem;
+    border-radius: 10px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .account-menu-item:hover {
+    background: rgb(255 255 255 / 0.07);
+  }
+}
+
+/* Account popover under the player's name in the header. */
+.account-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.75rem);
+  z-index: 50;
+  width: min(21rem, calc(100vw - 2rem));
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background: linear-gradient(170deg, rgb(16 28 34 / 0.92), rgb(4 8 10 / 0.96));
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 40px 90px -30px rgb(0 0 0 / 0.9),
+    0 0 0 1px rgb(0 0 0 / 0.4),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  white-space: normal;
+  transform-origin: top right;
+  animation: menu-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96) perspective(600px) rotateX(8deg);
+  }
+}
+.mini-card {
+  position: relative;
+  margin: 0.5rem 0.5rem 0;
+  padding: 1rem 1.1rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--tier) 40%, rgb(255 255 255 / 0.1));
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tier) 22%, transparent), transparent 60%),
+    repeating-linear-gradient(115deg, transparent 0 18px, rgb(255 255 255 / 0.025) 18px 19px),
+    linear-gradient(165deg, #14232b 0%, #070c0f 70%);
+  box-shadow: 0 18px 50px -24px color-mix(in srgb, var(--tier) 70%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.1);
 }
 
 /* Player card. */

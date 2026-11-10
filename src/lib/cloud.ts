@@ -19,9 +19,20 @@ export function supabase(): SupabaseClient {
   return (client ??= createClient(url!, key!));
 }
 
+/** How the signed-in person got in, for the account menu. */
+export interface Account {
+  /** True for "Continue as a guest": the profile lives on this device until they link Google. */
+  guest: boolean;
+  google: boolean;
+  email: string | null;
+  /** Google profile picture, once Google is linked. */
+  avatar: string | null;
+}
+
 export interface Snapshot {
   /** Supabase auth user, or null when signed out. */
   authId: string | null;
+  account: Account | null;
   /** The signed-in person's player id, once they have made a profile. */
   userId: string | null;
   players: Record<string, Player>;
@@ -103,7 +114,8 @@ const LOG_PER_MATCH = 80;
 export async function fetchAll(): Promise<Snapshot> {
   const sb = supabase();
   const { data: auth } = await sb.auth.getSession();
-  const authId = auth.session?.user.id ?? null;
+  const user = auth.session?.user ?? null;
+  const authId = user?.id ?? null;
   const [players, matches, participants, teams, log, events] = await Promise.all([
     sb.from("players").select("*"),
     sb.from("matches").select("*").order("created_at"),
@@ -140,8 +152,17 @@ export async function fetchAll(): Promise<Snapshot> {
   const drafts = new Map((check(teams) as Row[]).map((r) => [r.match_id as string, r]));
   const playerRows = check(players) as Row[];
 
+  const google = Boolean(user?.identities?.some((i) => i.provider === "google"));
   return {
     authId,
+    account: user
+      ? {
+          guest: Boolean(user.is_anonymous) && !google,
+          google,
+          email: user.email || null,
+          avatar: (user.user_metadata?.avatar_url as string | undefined) ?? null,
+        }
+      : null,
     userId: authId ? (playerRows.find((r) => r.owner === authId)?.id ?? null) : null,
     players: Object.fromEntries(playerRows.map((r) => [r.id, toPlayer(r)])),
     matches: (check(matches) as Row[]).map((r) => {
@@ -267,6 +288,35 @@ export function watch(onChange: () => void) {
   // Never call Supabase from inside this callback: it runs while the auth lock is held.
   sb.auth.onAuthStateChange(() => setTimeout(onChange, 0));
   sb.channel("fairsides").on("postgres_changes", { event: "*", schema: "public" }, onChange).subscribe();
+}
+
+/**
+ * Turns a guest into a Google account without changing their user id, so the
+ * profile and matches they already have stay theirs. Needs "Allow manual
+ * linking" switched on under Authentication > Sign In / Providers in Supabase.
+ * The browser leaves for Google and comes back to `returnTo`.
+ */
+export async function linkGoogle(returnTo: string) {
+  const { error } = await supabase().auth.linkIdentity({ provider: "google", options: { redirectTo: returnTo } });
+  if (error) throw new Error(error.message);
+}
+
+/** Reads the error Supabase puts on the URL when a Google link bounces back, then tidies the URL. */
+export function takeAuthError(): string | null {
+  const params = (raw: string) => new URLSearchParams(raw.replace(/^[#?]/, ""));
+  const q = params(window.location.search);
+  const h = params(window.location.hash);
+  const code = q.get("error_code") ?? h.get("error_code");
+  const text = q.get("error_description") ?? h.get("error_description");
+  if (!code && !text) return null;
+  window.history.replaceState(null, "", window.location.pathname);
+  if (code === "identity_already_exists") {
+    return "That Google account already has its own Fairsides profile. Sign out and continue with Google to use it, or pick a different Google account.";
+  }
+  if (code === "manual_linking_disabled") {
+    return 'Linking accounts is switched off. In Supabase, turn on "Allow manual linking" under Authentication > Sign In / Providers.';
+  }
+  return text || "Connecting Google didn't finish. Try again.";
 }
 
 export interface SignInMethods {

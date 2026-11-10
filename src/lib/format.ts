@@ -12,4 +12,8 @@ export const formatWhen = (iso: string) => {
 };
 
 export const formatFee = (fee: number) => (fee > 0 ? `₹${fee} each` : "Free");
-export const formatSize = (perSide: number) => `${perSide}-a-side`;
+/** "Asha", "Asha and Ben", "Asha, Ben and Chen". */
+export const formatList = (names: string[]) =>
+  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+export const formatSize =(perSide: number) => `${perSide}-a-side`;
