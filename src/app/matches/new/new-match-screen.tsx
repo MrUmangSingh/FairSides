@@ -2,12 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Field, SideStepper, placesHint } from "@/components/form-bits";
 import { NeedsProfile } from "@/components/needs-profile";
+import { MAX_PLACES } from "@/lib/domain/squad";
 import { ODD_MODES, type OddMode } from "@/lib/domain/types";
 import { actions, useHydrated, useStore } from "@/lib/store";
-
-const MIN_SIDE = 3;
-const MAX_SIDE = 15;
 
 export function NewMatchScreen() {
   const router = useRouter();
@@ -29,7 +28,6 @@ export function NewMatchScreen() {
   if (!userId) return <NeedsProfile action="host a match" />;
 
   const max = maxPlayers ?? perSide * 2 + 2;
-  const subs = max - perSide * 2;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,6 +36,7 @@ export function NewMatchScreen() {
     if (!venue.trim()) next.venue = "Enter where you're playing.";
     if (!datetime) next.datetime = "Pick a date and kick-off time.";
     if (max < perSide * 2) next.max = `A ${perSide}-a-side match needs at least ${perSide * 2} places.`;
+    if (max > MAX_PLACES) next.max = `A match can have up to ${MAX_PLACES} places.`;
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
@@ -96,34 +95,8 @@ export function NewMatchScreen() {
           <span className="field-label" id="side-label">
             Players per side
           </span>
-          <div className="flex items-center gap-5">
-            <button
-              type="button"
-              className="btn btn-line size-11 px-0 text-xl"
-              onClick={() => setPerSide((n) => Math.max(MIN_SIDE, n - 1))}
-              disabled={perSide <= MIN_SIDE}
-              aria-label="One fewer player per side"
-            >
-              −
-            </button>
-            <output
-              className="min-w-28 text-center font-display text-4xl font-bold tabular-nums"
-              aria-labelledby="side-label"
-              aria-live="polite"
-            >
-              {perSide}v{perSide}
-            </output>
-            <button
-              type="button"
-              className="btn btn-line size-11 px-0 text-xl"
-              onClick={() => setPerSide((n) => Math.min(MAX_SIDE, n + 1))}
-              disabled={perSide >= MAX_SIDE}
-              aria-label="One more player per side"
-            >
-              +
-            </button>
-          </div>
-          <p className="field-hint">Any size from 3-a-side to 15-a-side.</p>
+          <SideStepper value={perSide} onChange={setPerSide} labelId="side-label" />
+          <p className="field-hint">Any size from 3-a-side to 15-a-side. You can change it later.</p>
         </div>
 
         <div className="grid gap-8 sm:grid-cols-2">
@@ -131,13 +104,7 @@ export function NewMatchScreen() {
             id="max"
             label="Total places"
             error={errors.max}
-            hint={
-              subs > 0
-                ? `${perSide * 2} on the pitch and ${subs} ${subs === 1 ? "sub" : "subs"}. Anyone after that joins the waitlist.`
-                : subs === 0
-                  ? "No subs. Anyone after that joins the waitlist."
-                  : undefined
-            }
+            hint={placesHint(perSide, max)}
           >
             <input
               id="max"
@@ -145,7 +112,7 @@ export function NewMatchScreen() {
               inputMode="numeric"
               className="input"
               min={perSide * 2}
-              max={40}
+              max={MAX_PLACES}
               value={max}
               onChange={(e) => setMaxPlayers(Number(e.target.value))}
             />
@@ -199,36 +166,6 @@ export function NewMatchScreen() {
           Create match
         </button>
       </form>
-    </div>
-  );
-}
-
-function Field({
-  id,
-  label,
-  hint,
-  error,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label htmlFor={id} className="field-label">
-        {label}
-      </label>
-      {children}
-      {error ? (
-        <p className="mt-2 text-sm text-warn" role="alert">
-          {error}
-        </p>
-      ) : hint ? (
-        <p className="field-hint">{hint}</p>
-      ) : null}
     </div>
   );
 }

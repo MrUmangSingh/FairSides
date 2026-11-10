@@ -5,7 +5,23 @@ import * as cloud from "./cloud";
 import { SAMPLE_PLAYERS } from "./domain/samples";
 import { ovr, withAdjustment } from "./domain/ratings";
 import { STOPPED, matchMinute, pauseClock, startClock, summarise, tallyOf } from "./domain/referee";
-import type { Adjustment, EventKind, LogEntry, Match, OddMode, Player, Side, Teams, Zone } from "./domain/types";
+import { MAX_PLACES, MAX_SIDE, MIN_SIDE, fitSquad } from "./domain/squad";
+import { formatFee, formatWhen } from "./format";
+import type {
+  Adjustment,
+  EventKind,
+  LogEntry,
+  Match,
+  OddMode,
+  Participant,
+  Player,
+  Side,
+  Teams,
+  Zone,
+} from "./domain/types";
+
+/** What the host can change after creating a match. */
+export type MatchSettings = Pick<Match, "title" | "venue" | "datetime" | "perSide" | "maxPlayers" | "fee" | "visibility">;
 
 /**
  * The app's data layer. Screens read one State object and call actions; every
@@ -536,6 +552,53 @@ export const actions = {
       const names: Record<OddMode, string> = { sub: "rolling sub", uneven: "uneven teams", joker: "joker" };
       // The old split was built for the other mode.
       return logged({ ...m, oddMode, teams: null }, "mode", `Odd-player rule set to ${names[oddMode]}`);
+    });
+  },
+
+  /**
+   * Host only: changes the match after it was created. The size can change while
+   * the teams are open; the details (name, venue, time, fee, who can join) any
+   * time before the match is cancelled.
+   */
+  editMatch(matchId: string, changes: MatchSettings) {
+    updateMatch(matchId, (m, players) => {
+      if (m.status === "cancelled" || m.status === "completed") return m;
+      const sizeOk = m.status === "open";
+      const perSide = sizeOk ? Math.min(MAX_SIDE, Math.max(MIN_SIDE, changes.perSide)) : m.perSide;
+      const maxPlayers = sizeOk ? Math.min(MAX_PLACES, Math.max(perSide * 2, changes.maxPlayers)) : m.maxPlayers;
+      let next: Match = {
+        ...m,
+        title: changes.title.trim() || m.title,
+        venue: changes.venue.trim() || m.venue,
+        datetime: changes.datetime || m.datetime,
+        fee: Math.max(0, Math.round(changes.fee)),
+        visibility: changes.visibility,
+        perSide,
+        maxPlayers,
+        minPlayers: perSide * 2,
+        participants: fitSquad(m.participants, maxPlayers, m.hostId),
+      };
+
+      const said: string[] = [];
+      if (perSide !== m.perSide) said.push(`made it ${perSide}v${perSide}`);
+      if (maxPlayers !== m.maxPlayers) said.push(`set ${maxPlayers} places`);
+      const moved = next.participants.filter((p, i) => p !== m.participants[i]);
+      const names = (st: Participant["status"]) =>
+        moved.filter((p) => p.status === st).map((p) => players[p.userId]?.name ?? "a player");
+      if (names("waitlist").length) said.push(`moved ${names("waitlist").join(", ")} to the waitlist`);
+      if (names("joined").length) said.push(`gave ${names("joined").join(", ")} a place from the waitlist`);
+      if (next.title !== m.title) said.push(`renamed it "${next.title}"`);
+      if (next.venue !== m.venue) said.push(`moved it to ${next.venue}`);
+      if (next.datetime !== m.datetime) said.push(`moved kick-off to ${formatWhen(next.datetime)}`);
+      if (next.fee !== m.fee) said.push(`set the fee to ${formatFee(next.fee).toLowerCase()}`);
+      if (next.visibility !== m.visibility) said.push(next.visibility === "private" ? "made it private" : "made it public");
+      if (said.length === 0) return m;
+
+      // A split made for another size, or another squad, no longer fits.
+      if (moved.length) next = squadChanged(next);
+      else if (perSide !== m.perSide) next = { ...next, teams: null };
+      const detail = said.join(", ");
+      return logged(next, "settings", (detail[0].toUpperCase() + detail.slice(1)).slice(0, 300));
     });
   },
 

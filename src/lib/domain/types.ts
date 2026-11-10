@@ -90,7 +90,7 @@ export interface LogEntry {
   /** Stable id, so an entry reworded in place is the same row in the database. */
   id?: string;
   at: number;
-  action: "generate" | "shuffle" | "move" | "swap" | "pin" | "lock" | "rating" | "mode" | "remove";
+  action: "generate" | "shuffle" | "move" | "swap" | "pin" | "lock" | "rating" | "mode" | "remove" | "settings";
   detail: string;
 }
 

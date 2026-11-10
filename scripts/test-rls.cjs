@@ -119,6 +119,26 @@ let pass = 0, failN = 0;
     r = await run(`select teams from match_teams where match_id=$1`, [M]);
     expect("leaving clears the teams", r.rows?.[0].teams === null, r);
 
+    // ------------------------------------------------------------ changing the size
+    // The same writes the app makes when the host edits the match.
+    r = await run(`select player_id from match_participants where match_id=$1 and status='waitlist'`, [M]);
+    const waiting = r.rows.map((x) => x.player_id);
+    r = await run(`update matches set per_side=4, max_players=10, min_players=8, title='Bigger', fee=100 where id=$1`, [M]);
+    expect("host changes the match to 4v4 with 10 places", r.ok && r.count === 1, r);
+    r = await run(`update match_participants set status='joined' where match_id=$1 and player_id = any($2)`, [M, waiting]);
+    expect("host moves the waitlist into the new places", r.ok && r.count === 3, r);
+    r = await run(`update matches set per_side=4, max_players=7 where id=$1`, [M]);
+    expect("places can't drop below both full sides", !r.ok, r);
+    await as(U2);
+    r = await run(`update matches set per_side=8, max_players=16 where id=$1`, [M]);
+    expect("a player cannot change the size", r.ok && r.count === 0, r);
+    r = await run(`update match_participants set status='waitlist' where match_id=$1`, [M]);
+    expect("a player cannot move people to the waitlist", r.ok && r.count === 0, r);
+    await as(U1);
+    r = await run(`update matches set per_side=3, max_players=6, min_players=6, title='T', fee=0 where id=$1`, [M]);
+    r = await run(`update match_participants set status='waitlist' where match_id=$1 and player_id = any($2)`, [M, waiting]);
+    expect("host shrinks it back and sends the extra players to the waitlist", r.ok && r.count === 3, r);
+
     // ------------------------------------------------------------ referee
     const ev = (kind, side, pid) => [`insert into match_events (match_id, kind, side, player_id, minute) values ($1,$2,$3,$4,5)`, [M, kind, side, pid]];
     r = await run(`select become_referee($1)`, [M]);

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
+import { use, useState } from "react";
 import { BalanceMeter, TEAM_NAMES } from "@/components/balance-meter";
+import { MatchSettings } from "@/components/match-settings";
 import { RatingPanel } from "@/components/rating-panel";
 import { RefereeSection } from "@/components/referee-bits";
 import { TeamEditor } from "@/components/team-editor";
@@ -81,7 +82,7 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
 
       <PlaceCounter joined={joined.length} max={match.maxPlayers} needed={match.minPlayers} />
 
-      {isHost && !cancelled ? <HostBar match={match} joined={joined} /> : null}
+      {isHost && !cancelled ? <HostBar match={match} joined={joined} players={players} /> : null}
 
       <RefereeSection match={match} players={players} userId={userId} />
 
@@ -245,7 +246,8 @@ function PlaceCounter({ joined, max, needed }: { joined: number; max: number; ne
   );
 }
 
-function HostBar({ match, joined }: { match: Match; joined: Player[] }) {
+function HostBar({ match, joined, players }: { match: Match; joined: Player[]; players: Record<string, Player> }) {
+  const [editing, setEditing] = useState(false);
   const locked = match.status === "locked";
   const emptyPlaces = match.maxPlayers - joined.length;
   const pinned = Object.keys(match.pins).length;
@@ -290,6 +292,14 @@ function HostBar({ match, joined }: { match: Match; joined: Player[] }) {
         )}
         <button
           type="button"
+          className="btn btn-line"
+          aria-expanded={editing}
+          onClick={() => setEditing((v) => !v)}
+        >
+          {editing ? "Close settings" : `Edit match (${match.perSide}v${match.perSide})`}
+        </button>
+        <button
+          type="button"
           className="btn btn-line ml-auto"
           onClick={() => {
             if (window.confirm("Cancel this match for everyone?")) actions.cancel(match.id);
@@ -303,6 +313,8 @@ function HostBar({ match, joined }: { match: Match; joined: Player[] }) {
           {pinned} pinned {pinned === 1 ? "player stays" : "players stay"} put when you shuffle.
         </p>
       ) : null}
+
+      {editing ? <MatchSettings match={match} players={players} onDone={() => setEditing(false)} /> : null}
 
       {locked ? null : (
         <div className="chalk-rule mt-5 pt-4">
