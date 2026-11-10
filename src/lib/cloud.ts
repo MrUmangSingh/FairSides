@@ -1,7 +1,8 @@
 "use client";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { LogEntry, Match, Participant, Player, Teams } from "./domain/types";
+import { STOPPED } from "./domain/referee";
+import type { Clock, LogEntry, Match, MatchEvent, Participant, Player, Teams } from "./domain/types";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -103,12 +104,13 @@ export async function fetchAll(): Promise<Snapshot> {
   const sb = supabase();
   const { data: auth } = await sb.auth.getSession();
   const authId = auth.session?.user.id ?? null;
-  const [players, matches, participants, teams, log] = await Promise.all([
+  const [players, matches, participants, teams, log, events] = await Promise.all([
     sb.from("players").select("*"),
     sb.from("matches").select("*").order("created_at"),
     sb.from("match_participants").select("*"),
     sb.from("match_teams").select("*"),
     sb.from("match_log").select("*").order("at", { ascending: false }).limit(2000),
+    sb.from("match_events").select("*").order("at"),
   ]);
 
   const group = <T,>(rows: Row[], make: (r: Row) => T) => {
@@ -126,6 +128,14 @@ export async function fetchAll(): Promise<Snapshot> {
     at: Date.parse(r.at),
     action: r.action,
     detail: r.detail,
+  }));
+  const goalsAndCards = group<MatchEvent>(check(events) as Row[], (r) => ({
+    id: r.id,
+    at: Date.parse(r.at),
+    minute: r.minute,
+    kind: r.kind,
+    side: r.side,
+    playerId: r.player_id,
   }));
   const drafts = new Map((check(teams) as Row[]).map((r) => [r.match_id as string, r]));
   const playerRows = check(players) as Row[];
@@ -158,6 +168,9 @@ export async function fetchAll(): Promise<Snapshot> {
         log: (logs.get(r.id) ?? []).slice(0, LOG_PER_MATCH),
         minutes: r.minutes,
         rotateEvery: r.rotate_every,
+        refereeId: r.referee_id ?? null,
+        clock: (r.clock as Clock | null) ?? STOPPED,
+        events: goalsAndCards.get(r.id) ?? [],
       } satisfies Match;
     }),
   };
@@ -217,7 +230,36 @@ export const rpc = {
   async addSamplePlayers(matchId: string, count: number) {
     check(await supabase().rpc("add_sample_players", { m: matchId, n: count }));
   },
+  async becomeReferee(matchId: string) {
+    check(await supabase().rpc("become_referee", { m: matchId }));
+  },
+  async clearReferee(matchId: string) {
+    check(await supabase().rpc("clear_referee", { m: matchId }));
+  },
+  async setClock(matchId: string, clock: Clock) {
+    check(await supabase().rpc("set_match_clock", { m: matchId, c: clock }));
+  },
 };
+
+export async function addEvent(matchId: string, e: MatchEvent) {
+  check(
+    await supabase()
+      .from("match_events")
+      .insert({
+        id: e.id,
+        match_id: matchId,
+        at: new Date(e.at).toISOString(),
+        minute: e.minute,
+        kind: e.kind,
+        side: e.side,
+        player_id: e.playerId,
+      }),
+  );
+}
+
+export async function removeEvent(eventId: string) {
+  check(await supabase().from("match_events").delete().eq("id", eventId));
+}
 
 /** Calls back whenever anything changes in the database or the session. */
 export function watch(onChange: () => void) {

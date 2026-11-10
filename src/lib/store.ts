@@ -4,7 +4,8 @@ import { useSyncExternalStore } from "react";
 import * as cloud from "./cloud";
 import { SAMPLE_PLAYERS } from "./domain/samples";
 import { ovr, withAdjustment } from "./domain/ratings";
-import type { Adjustment, LogEntry, Match, OddMode, Player, Teams, Zone } from "./domain/types";
+import { STOPPED, matchMinute, pauseClock, startClock, summarise, tallyOf } from "./domain/referee";
+import type { Adjustment, EventKind, LogEntry, Match, OddMode, Player, Side, Teams, Zone } from "./domain/types";
 
 /**
  * The app's data layer. Screens read one State object and call actions; every
@@ -76,6 +77,9 @@ function upgrade(m: Match): Match {
     minutes: m.minutes ?? 60,
     rotateEvery: m.rotateEvery ?? 10,
     teams: m.teams ? { ...m.teams, joker: m.teams.joker ?? null } : null,
+    refereeId: m.refereeId ?? null,
+    clock: m.clock ?? STOPPED,
+    events: m.events ?? [],
   };
 }
 
@@ -157,6 +161,17 @@ function send(work: Promise<unknown>) {
       fail(e);
     },
   );
+}
+
+/**
+ * The referee's writes go out one at a time, in order, so a quick start then
+ * pause can't arrive the wrong way round.
+ */
+let refereeQueue: Promise<unknown> = Promise.resolve();
+function sendInOrder(work: () => Promise<unknown>) {
+  const next = refereeQueue.then(work);
+  refereeQueue = next.catch(() => {});
+  send(next);
 }
 
 function markDirty(matchId: string) {
@@ -332,6 +347,9 @@ export const actions = {
       log: [],
       minutes: 60,
       rotateEvery: 10,
+      refereeId: null,
+      clock: STOPPED,
+      events: [],
     };
     write({ ...s, matches: [...s.matches, match] });
     if (CLOUD) send(cloud.insertMatch(match).then(() => persisted.set(match.id, match)));
@@ -340,7 +358,7 @@ export const actions = {
 
   join(matchId: string, userId: string) {
     updateMatch(matchId, (m) => {
-      if (m.status !== "open" || m.participants.some((p) => p.userId === userId)) return m;
+      if (m.status !== "open" || m.refereeId === userId || m.participants.some((p) => p.userId === userId)) return m;
       const joined = m.participants.filter((p) => p.status === "joined").length;
       const status = joined < m.maxPlayers ? "joined" : "waitlist";
       const next: Match = { ...m, participants: [...m.participants, { userId, status, joinedAt: Date.now() }] };
@@ -540,7 +558,74 @@ export const actions = {
   cancel(matchId: string) {
     updateMatch(matchId, (m) => ({ ...m, status: "cancelled" }));
   },
+
+  /**
+   * The signed-in player referees this match. A squad member gives up their
+   * place to do it (only while the teams are open); the host always plays.
+   */
+  becomeReferee(matchId: string) {
+    const me = read().userId;
+    if (!me) return;
+    updateMatch(matchId, (m) => {
+      if (!canReferee(m, me)) return m;
+      const mine = m.participants.find((p) => p.userId === me);
+      if (!mine) return { ...m, refereeId: me };
+      const adjustments = { ...m.adjustments };
+      delete adjustments[me];
+      const next: Match = { ...m, refereeId: me, adjustments, participants: m.participants.filter((p) => p !== mine) };
+      return mine.status === "joined" ? squadChanged(promote(next)) : next;
+    }, false);
+    if (CLOUD) send(cloud.rpc.becomeReferee(matchId));
+  },
+
+  /** The referee steps down, or the host removes them. Goals, cards and the clock stay. */
+  clearReferee(matchId: string) {
+    updateMatch(matchId, (m) => (m.refereeId ? { ...m, refereeId: null } : m), false);
+    if (CLOUD) sendInOrder(() => cloud.rpc.clearReferee(matchId));
+  },
+
+  clock(matchId: string, action: "start" | "pause" | "reset") {
+    const now = Date.now();
+    const before = read().matches.find((m) => m.id === matchId);
+    if (!before) return;
+    const clock =
+      action === "start" ? startClock(before.clock, now) : action === "pause" ? pauseClock(before.clock, now) : STOPPED;
+    if (clock === before.clock) return;
+    updateMatch(matchId, (m) => ({ ...m, clock }), false);
+    if (CLOUD) sendInOrder(() => cloud.rpc.setClock(matchId, clock));
+  },
+
+  /** Records a goal or card at the current minute on the clock. */
+  recordEvent(matchId: string, kind: EventKind, side: Side | null, playerId: string | null) {
+    const before = read().matches.find((m) => m.id === matchId);
+    if (!before || before.status !== "locked" || (kind === "goal" && !side) || (kind !== "goal" && !playerId)) return;
+    // A player who has been sent off can't score or be booked again.
+    if (playerId && tallyOf(summarise(before.events), playerId).sentOff) return;
+    const now = Date.now();
+    const event = {
+      id: logId() ?? uid(),
+      at: now,
+      minute: matchMinute(before.clock, now),
+      kind,
+      side: kind === "goal" ? side : null,
+      playerId,
+    };
+    updateMatch(matchId, (m) => ({ ...m, events: [...m.events, event] }), false);
+    if (CLOUD) sendInOrder(() => cloud.addEvent(matchId, event));
+  },
+
+  removeEvent(matchId: string, eventId: string) {
+    updateMatch(matchId, (m) => ({ ...m, events: m.events.filter((e) => e.id !== eventId) }), false);
+    if (CLOUD) sendInOrder(() => cloud.removeEvent(eventId));
+  },
 };
+
+/** Whether this player may volunteer as referee right now (the database checks the same). */
+export function canReferee(m: Match, playerId: string): boolean {
+  if (m.refereeId || m.hostId === playerId) return false;
+  if (m.status === "open") return true;
+  return m.status === "locked" && !m.participants.some((p) => p.userId === playerId);
+}
 
 export const joinedOf = (m: Match) =>
   m.participants.filter((p) => p.status === "joined").toSorted((x, y) => x.joinedAt - y.joinedAt);

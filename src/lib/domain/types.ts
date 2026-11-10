@@ -94,6 +94,30 @@ export interface LogEntry {
   detail: string;
 }
 
+/** The referee's match clock. Times are in milliseconds. */
+export interface Clock {
+  running: boolean;
+  /** Time banked before `since`. */
+  elapsed: number;
+  /** When the clock last started (epoch ms), or null while it is stopped. */
+  since: number | null;
+}
+
+export type EventKind = "goal" | "yellow" | "red";
+
+/** A goal or card the referee recorded. */
+export interface MatchEvent {
+  id: string;
+  at: number;
+  /** Match minute, or null if the clock was never started. */
+  minute: number | null;
+  kind: EventKind;
+  /** The team a goal counts for. */
+  side: Side | null;
+  /** The scorer or the booked player; null for a goal with no scorer named. */
+  playerId: string | null;
+}
+
 export interface Match {
   id: string;
   hostId: string;
@@ -117,4 +141,9 @@ export interface Match {
   /** Match length and how often subs rotate, in minutes. */
   minutes: number;
   rotateEvery: number;
+  /** A player who referees instead of playing. */
+  refereeId: string | null;
+  clock: Clock;
+  /** Oldest first. */
+  events: MatchEvent[];
 }

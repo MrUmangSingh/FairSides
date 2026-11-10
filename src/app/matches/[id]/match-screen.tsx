@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use } from "react";
 import { BalanceMeter, TEAM_NAMES } from "@/components/balance-meter";
 import { RatingPanel } from "@/components/rating-panel";
+import { RefereeSection } from "@/components/referee-bits";
 import { TeamEditor } from "@/components/team-editor";
 import { TeamStage } from "@/components/team-stage";
 import { balanceTeams } from "@/lib/domain/balance";
@@ -71,12 +72,18 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
             {formatSize(match.perSide)}, {formatFee(match.fee).toLowerCase()}
           </p>
         </div>
-        {cancelled ? null : <JoinControl match={match} userId={userId} mine={mine?.status} placesLeft={placesLeft} />}
+        {cancelled ? null : match.refereeId && match.refereeId === userId ? (
+          <p className="font-semibold">You&apos;re refereeing</p>
+        ) : (
+          <JoinControl match={match} userId={userId} mine={mine?.status} placesLeft={placesLeft} />
+        )}
       </header>
 
       <PlaceCounter joined={joined.length} max={match.maxPlayers} needed={match.minPlayers} />
 
       {isHost && !cancelled ? <HostBar match={match} joined={joined} /> : null}
+
+      <RefereeSection match={match} players={players} userId={userId} />
 
       <div className="mt-12 grid gap-12">
         <section aria-labelledby="teams-heading">

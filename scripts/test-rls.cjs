@@ -8,8 +8,8 @@ const env = Object.fromEntries(
     .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^(['"])(.*)\1$/, "$2")]; }),
 );
 const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
-const U1 = "11111111-1111-4111-8111-111111111111", U2 = "22222222-2222-4222-8222-222222222222";
-const P1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", P2 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+const U1 = "11111111-1111-4111-8111-111111111111", U2 = "22222222-2222-4222-8222-222222222222", U3 = "33333333-3333-4333-8333-333333333333";
+const P1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", P2 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", P3 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
 const M = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
 const stats = JSON.stringify({ pace: 60, stamina: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60 });
 let pass = 0, failN = 0;
@@ -36,7 +36,7 @@ let pass = 0, failN = 0;
 
   await c.query("begin");
   try {
-    await c.query(`insert into auth.users (id, aud, role, email) values ($1,'authenticated','authenticated','rls-a@example.invalid'), ($2,'authenticated','authenticated','rls-b@example.invalid')`, [U1, U2]);
+    await c.query(`insert into auth.users (id, aud, role, email) values ($1,'authenticated','authenticated','rls-a@example.invalid'), ($2,'authenticated','authenticated','rls-b@example.invalid'), ($3,'authenticated','authenticated','rls-c@example.invalid')`, [U1, U2, U3]);
 
     await as(U1);
     let r = await run(...player(P1, U1, "Host"));
@@ -118,10 +118,87 @@ let pass = 0, failN = 0;
     expect("the first in the waitlist takes the free place", r.rows?.[0].n === 6 && r.rows?.[1].n === 3, r);
     r = await run(`select teams from match_teams where match_id=$1`, [M]);
     expect("leaving clears the teams", r.rows?.[0].teams === null, r);
+
+    // ------------------------------------------------------------ referee
+    const ev = (kind, side, pid) => [`insert into match_events (match_id, kind, side, player_id, minute) values ($1,$2,$3,$4,5)`, [M, kind, side, pid]];
+    r = await run(`select become_referee($1)`, [M]);
+    expect("the host cannot referee their own match", !r.ok, r);
+    r = await run(`update matches set referee_id=$2 where id=$1`, [M, P1]);
+    expect("the host cannot name a referee directly", !r.ok, r);
+    r = await run(`update matches set clock='{"running":true,"elapsed":0,"since":null}' where id=$1`, [M]);
+    expect("the host cannot set the clock directly", !r.ok, r);
+    r = await run(`update matches set minutes=50 where id=$1`, [M]);
+    expect("the host can still edit the match", r.ok && r.count === 1, r);
+
+    await as(U2);
+    r = await run(`select become_referee($1)`, [M]);
+    expect("a player who isn't in the squad volunteers as referee", r.ok, r);
+    r = await run(`select referee_id from matches where id=$1`, [M]);
+    expect("they are now the referee", r.rows?.[0].referee_id === P2, r);
+    r = await run(`select join_match($1)`, [M]);
+    expect("the referee cannot also join as a player", !r.ok, r);
+    r = await run(`select set_match_clock($1, '{"running":true,"elapsed":0,"since":1700000000000}')`, [M]);
+    expect("the referee starts the clock", r.ok, r);
+    r = await run(`select set_match_clock($1, '{"running":"yes","elapsed":-4}')`, [M]);
+    expect("a broken clock value is refused", !r.ok, r);
+    r = await run(...ev("goal", "a", P1));
+    expect("no goals before the teams are locked", !r.ok, r);
+
+    await as(U3);
+    r = await run(...player(P3, U3, "Third"));
+    expect("third user creates a profile", r.ok, r);
+    r = await run(`select become_referee($1)`, [M]);
+    expect("a match has only one referee", !r.ok, r);
+    r = await run(`select set_match_clock($1, '{"running":false,"elapsed":0,"since":null}')`, [M]);
+    expect("only the referee runs the clock", !r.ok, r);
+
+    await as(U1);
+    await run(`update match_teams set teams='{"a":[],"b":[],"subs":[],"joker":null,"version":3}' where match_id=$1`, [M]);
+    r = await run(`update matches set status='locked' where id=$1`, [M]);
+    expect("host locks the teams again", r.ok && r.count === 1, r);
+    r = await run(...ev("yellow", null, P1));
+    expect("the host cannot record cards", !r.ok, r);
+
+    await as(U2);
+    r = await run(...ev("goal", "a", P1));
+    expect("the referee records a goal", r.ok, r);
+    r = await run(...ev("yellow", null, P1));
+    expect("the referee shows a yellow card", r.ok, r);
+    r = await run(...ev("red", null, P3));
+    expect("cards only go to people in the squad", !r.ok, r);
+    r = await run(...ev("goal", null, null));
+    expect("a goal must say which team it counts for", !r.ok, r);
+
+    await as(U3);
+    r = await run(`delete from match_events where match_id=$1`, [M]);
+    expect("others cannot delete events", r.ok && r.count === 0, r);
+    await as(null);
+    r = await run(`select count(*)::int n from match_events where match_id=$1`, [M]);
+    expect("everyone can read goals and cards", r.rows?.[0].n === 2, r);
+    r = await run(`select clock->>'running' running from matches where id=$1`, [M]);
+    expect("everyone can read the clock", r.rows?.[0].running === "true", r);
+
+    await as(U2);
+    r = await run(`delete from match_events where match_id=$1 and kind='yellow'`, [M]);
+    expect("the referee removes a mistaken card", r.ok && r.count === 1, r);
+
+    await as(U1);
+    r = await run(`select clear_referee($1)`, [M]);
+    expect("the host can remove the referee", r.ok, r);
+    await run(`update matches set status='open' where id=$1`, [M]);
+    await as(U3);
+    r = await run(`select join_match($1) s`, [M]);
+    expect("third user joins the squad", r.ok, r);
+    r = await run(`select become_referee($1)`, [M]);
+    expect("a squad member can switch to referee while teams are open", r.ok, r);
+    r = await run(`select (select referee_id from matches where id=$1) ref, (select count(*)::int from match_participants where match_id=$1 and player_id=$2) n`, [M, P3]);
+    expect("and gives up their place to do it", r.rows?.[0].ref === P3 && r.rows[0].n === 0, r);
+    r = await run(`select clear_referee($1)`, [M]);
+    expect("the referee can step down", r.ok, r);
   } finally {
     await c.query("rollback");
-    const left = await c.query("select (select count(*) from auth.users where email like 'rls-%@example.invalid')::int u, (select count(*) from public.matches)::int m");
-    console.log(`\n${pass} passed, ${failN} failed. Left behind: ${left.rows[0].u} test users, ${left.rows[0].m} matches.`);
+    const left = await c.query("select (select count(*) from auth.users where email like 'rls-%@example.invalid')::int u, (select count(*) from public.matches where id = $1)::int m", [M]);
+    console.log(`\n${pass} passed, ${failN} failed. Left behind: ${left.rows[0].u} test users, ${left.rows[0].m} test matches.`);
     await c.end();
   }
 })().catch((e) => { console.error("crashed:", e.message); process.exit(1); });

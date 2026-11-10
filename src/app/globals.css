@@ -18,6 +18,8 @@
   --color-bib-a: #f5d547;
   --color-bib-b: #ff5c9a;
   --color-warn: #ffb37a;
+  --color-card-yellow: #ffd60a;
+  --color-card-red: #ff3b30;
 
   --font-display: var(--font-archivo), "Arial Black", sans-serif;
   --font-display--font-variation-settings: "wdth" 125;

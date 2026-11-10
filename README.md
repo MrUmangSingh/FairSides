@@ -63,6 +63,12 @@ Authentication → Sign In / Providers:
 - **Brought forward from Phase 3 (done):** dark cinematic design, 3D hero with a scroll-driven
   camera, 3D ground for the team view (joker on the centre spot, subs on the touchline), player
   card with a radar chart. Card image export is still to do.
+- **Referee (added on request, not in the plan):** one player per match can volunteer to referee
+  instead of playing (a squad member gives up their place; the host always plays). The referee
+  view at `/matches/<id>/referee` has a match clock, the score, goals with or without a named
+  scorer, yellow and red cards (a second yellow sends the player off), and a list of events to
+  correct mistakes. Everyone sees the live score, scorers and cards on the match page. Only the
+  referee can write these; see `supabase/migrations/0003_referee.sql`.
 - **Not done from the plan's Phase 2 list:** dragging players in the 3D view (the editor below it
   does the moving), transferring the host role, editing match details after creating.
 - **Next, Phase 4:** advanced mode, match results, peer ratings, Verified badge, reliability score.
