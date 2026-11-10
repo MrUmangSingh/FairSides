@@ -256,6 +256,10 @@
       linear-gradient(180deg, #071015, #020506);
     box-shadow: 0 40px 120px -50px rgb(70 240 160 / 0.45);
   }
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.25) transparent;
+  }
   .seg {
     display: inline-flex;
     padding: 3px;

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useStore } from "@/lib/store";
 
 export function SiteHeader() {
-  const { userId, players } = useStore();
+  const { userId, players, cloud, signedIn, ready } = useStore();
   const me = userId ? players[userId] : null;
 
   return (
@@ -25,7 +25,7 @@ export function SiteHeader() {
           Create match
         </Link>
         <Link href="/profile" className="btn btn-line btn-sm">
-          {me ? me.name : "Create profile"}
+          {me ? me.name : cloud && ready && !signedIn ? "Sign in" : "Create profile"}
         </Link>
       </nav>
       </div>

@@ -15,7 +15,19 @@ const VIEWS = {
 type ViewId = keyof typeof VIEWS;
 
 /** The match's teams on the 3D ground, with camera presets and a flat fallback. */
-export function TeamStage({ a, b, label }: { a: Player[]; b: Player[]; label: string }) {
+export function TeamStage({
+  a,
+  b,
+  joker,
+  subs,
+  label,
+}: {
+  a: Player[];
+  b: Player[];
+  joker?: Player | null;
+  subs?: Player[];
+  label: string;
+}) {
   const [viewId, setViewId] = useState<ViewId>("stand");
   const [flat, setFlat] = useState(false);
 
@@ -24,11 +36,11 @@ export function TeamStage({ a, b, label }: { a: Player[]; b: Player[]; label: st
       {flat ? (
         <div className="grid h-full place-items-center p-4 pt-16">
           <div className="h-full" style={{ aspectRatio: "2 / 3" }}>
-            <Pitch a={a} b={b} label={label} />
+            <Pitch a={a} b={b} joker={joker} label={label} />
           </div>
         </div>
       ) : (
-        <Pitch3D a={a} b={b} label={label} view={VIEWS[viewId].view} drag className="absolute inset-0" />
+        <Pitch3D a={a} b={b} joker={joker} subs={subs} label={label} view={VIEWS[viewId].view} drag className="absolute inset-0" />
       )}
 
       <div className="absolute inset-x-3 top-3 flex flex-wrap items-center justify-between gap-2">

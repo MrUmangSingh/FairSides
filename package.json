@@ -7,11 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:test": "node scripts/test-rls.cjs"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
+    "@supabase/supabase-js": "^2.119.0",
     "lenis": "^1.3.27",
     "next": "16.4.6",
     "react": "19.3.0",
@@ -26,6 +30,7 @@
     "@types/three": "^0.187.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "pg": "^8.23.1",
     "tailwindcss": "4.3.3",
     "typescript": "^5",
     "vitest": "^5.1.0"

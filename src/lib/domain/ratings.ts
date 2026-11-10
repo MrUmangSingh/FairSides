@@ -1,4 +1,4 @@
-import type { Player, Position, Stats } from "./types";
+import { STAT_KEYS, type Adjustment, type Player, type Position, type Stats } from "./types";
 
 const mean = (...xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
 
@@ -29,3 +29,26 @@ export const attack = (p: Player) => mean(p.stats.shooting, p.stats.dribbling, p
 export const defense = (p: Player) => mean(p.stats.defending, p.stats.stamina, p.stats.stamina);
 
 export const clampStat = (n: number) => Math.max(1, Math.min(99, Math.round(n)));
+
+/** The player as the host rates them for this match; the profile itself is untouched. */
+export function withAdjustment(p: Player, adj: Adjustment | undefined): Player {
+  return adj ? { ...p, stats: adj.stats, gk: adj.gk } : p;
+}
+
+/**
+ * Moves every stat by the same amount so the overall lands on the target.
+ * The position weights add up to 1, so one pass is exact unless a stat hits 1 or 99.
+ */
+export function shiftToOvr(p: Player, target: number): Adjustment {
+  let stats = { ...p.stats };
+  let gk = p.gk;
+  for (let pass = 0; pass < 4; pass++) {
+    const delta = target - ovrFor(stats, gk, p.primaryPos);
+    if (Math.abs(delta) < 0.5) break;
+    const next = {} as Stats;
+    for (const k of STAT_KEYS) next[k] = clampStat(stats[k] + delta);
+    stats = next;
+    gk = clampStat(gk + delta);
+  }
+  return { stats, gk };
+}

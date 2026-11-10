@@ -52,11 +52,46 @@ export interface Participant {
   joinedAt: number;
 }
 
+export type OddMode = "sub" | "uneven" | "joker";
+export type Side = "a" | "b";
+export type Zone = Side | "subs";
+
+export const ODD_MODES: Record<OddMode, { label: string; hint: string }> = {
+  sub: {
+    label: "Rolling sub",
+    hint: "Equal teams. The spare player rotates in every few minutes.",
+  },
+  uneven: {
+    label: "Uneven teams",
+    hint: "Everyone plays. The bigger team gets the weaker players to make up for it.",
+  },
+  joker: {
+    label: "Joker",
+    hint: "Equal teams, plus one neutral player who plays for whichever side has the ball.",
+  },
+};
+
 export interface Teams {
   a: string[];
   b: string[];
   subs: string[];
+  /** Neutral player in joker mode. */
+  joker: string | null;
   version: number;
+}
+
+/** The host's rating for one player, for this match only. */
+export interface Adjustment {
+  stats: Stats;
+  gk: number;
+}
+
+export interface LogEntry {
+  /** Stable id, so an entry reworded in place is the same row in the database. */
+  id?: string;
+  at: number;
+  action: "generate" | "shuffle" | "move" | "swap" | "pin" | "lock" | "rating" | "mode" | "remove";
+  detail: string;
 }
 
 export interface Match {
@@ -74,4 +109,12 @@ export interface Match {
   status: MatchStatus;
   participants: Participant[];
   teams: Teams | null;
+  oddMode: OddMode;
+  /** Players the host has fixed to a side; they stay put on shuffle. */
+  pins: Record<string, Side>;
+  adjustments: Record<string, Adjustment>;
+  log: LogEntry[];
+  /** Match length and how often subs rotate, in minutes. */
+  minutes: number;
+  rotateEvery: number;
 }

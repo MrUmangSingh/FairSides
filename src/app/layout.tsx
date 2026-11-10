@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Archivo } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SmoothScroll } from "@/components/smooth-scroll";
+import { SaveError, StorageNote } from "@/components/store-status";
 import "./globals.css";
 
 // One variable family: regular width for reading, stretched wide for headlines.
@@ -36,10 +37,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </main>
         <footer className="chalk-rule mt-24">
           <div className="mx-auto max-w-7xl px-5 py-8 text-sm text-chalk-dim">
-            Fairsides keeps everything in this browser for now. Accounts and shared matches arrive
-            with the next release.
+            <StorageNote />
           </div>
         </footer>
+        <SaveError />
       </body>
     </html>
   );

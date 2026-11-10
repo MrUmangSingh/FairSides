@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { PlayerCard } from "@/components/player-card";
+import { SignIn } from "@/components/sign-in";
 import { ovrFor } from "@/lib/domain/ratings";
 import {
   POSITION_LABELS,
@@ -30,15 +31,17 @@ const STAT_HELP: Record<keyof Stats, string> = {
 
 export function ProfileScreen() {
   const hydrated = useHydrated();
-  const { userId, players } = useStore();
+  const { userId, players, cloud, signedIn } = useStore();
   const [revealed, setRevealed] = useState(false);
   if (!hydrated) return <div className="mx-auto max-w-3xl px-5 py-10" aria-busy="true" />;
+  if (cloud && !signedIn) return <SignIn />;
 
   const me = userId ? players[userId] : null;
-  const others = Object.values(players).filter((p) => !p.sample && p.id !== userId);
+  // Switching between profiles is a local-only convenience; with accounts you sign out instead.
+  const others = cloud ? [] : Object.values(players).filter((p) => !p.sample && p.id !== userId);
   // Remount the form when the signed-in player changes so it starts from their numbers.
   if (revealed && me) return <CardReveal me={me} onEdit={() => setRevealed(false)} />;
-  return <ProfileForm key={userId ?? "new"} me={me} others={others} onSaved={() => setRevealed(true)} />;
+  return <ProfileForm key={userId ?? "new"} me={me} others={others} cloud={cloud} onSaved={() => setRevealed(true)} />;
 }
 
 function CardReveal({ me, onEdit }: { me: Player; onEdit: () => void }) {
@@ -66,7 +69,17 @@ function CardReveal({ me, onEdit }: { me: Player; onEdit: () => void }) {
   );
 }
 
-function ProfileForm({ me, others, onSaved }: { me: Player | null; others: Player[]; onSaved: () => void }) {
+function ProfileForm({
+  me,
+  others,
+  cloud,
+  onSaved,
+}: {
+  me: Player | null;
+  others: Player[];
+  cloud: boolean;
+  onSaved: () => void;
+}) {
   const [name, setName] = useState(me?.name ?? "");
   const [stats, setStats] = useState<Stats>(me?.stats ?? DEFAULT_STATS);
   const [gk, setGk] = useState(me?.gk ?? 50);
@@ -253,9 +266,9 @@ function ProfileForm({ me, others, onSaved }: { me: Player | null; others: Playe
           <button type="submit" className="btn">
             Save profile
           </button>
-          {me ? (
+          {me || cloud ? (
             <button type="button" className="btn btn-line" onClick={() => actions.signOut()}>
-              Switch player
+              {cloud ? "Sign out" : "Switch player"}
             </button>
           ) : null}
         </div>

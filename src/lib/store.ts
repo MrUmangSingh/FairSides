@@ -1,30 +1,53 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import * as cloud from "./cloud";
 import { SAMPLE_PLAYERS } from "./domain/samples";
-import type { Match, Player, Teams } from "./domain/types";
+import { ovr, withAdjustment } from "./domain/ratings";
+import type { Adjustment, LogEntry, Match, OddMode, Player, Teams, Zone } from "./domain/types";
 
 /**
- * Phase 1 data layer. Everything lives in this browser's localStorage so the
- * app runs with no accounts or keys; tabs stay in sync through the storage
- * event. The action names mirror the tables in supabase/migrations, so
- * swapping this file for Supabase calls does not touch the screens.
+ * The app's data layer. Screens read one State object and call actions; every
+ * action is a plain function from the old match to the new one.
+ *
+ * Two places can hold the data. With Supabase configured (see cloud.ts) the
+ * state is fetched from the database, kept live through realtime, and each
+ * change is applied here first and then written behind the scenes. Without it
+ * everything lives in this browser's localStorage, synced across tabs.
  */
 const KEY = "fairsides:v1";
+const CLOUD = cloud.cloudEnabled;
 
 export interface State {
   userId: string | null;
   players: Record<string, Player>;
   matches: Match[];
+  /** True when accounts and shared matches are on. */
+  cloud: boolean;
+  /** Cloud only: someone is signed in (they may not have made a profile yet). */
+  signedIn: boolean;
+  /** False until the first load from the database has finished. */
+  ready: boolean;
+  /** The last thing that failed to save, in plain words. */
+  error: string | null;
 }
 
-const EMPTY: State = { userId: null, players: {}, matches: [] };
+const EMPTY: State = {
+  userId: null,
+  players: {},
+  matches: [],
+  cloud: CLOUD,
+  signedIn: false,
+  ready: !CLOUD,
+  error: null,
+};
 
 let cache: State = EMPTY;
 let cacheRaw: string | null = null;
 const listeners = new Set<() => void>();
 
 function read(): State {
+  if (CLOUD) return cache;
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(KEY);
@@ -34,26 +57,150 @@ function read(): State {
   if (raw === cacheRaw) return cache;
   cacheRaw = raw;
   try {
-    cache = raw ? { ...EMPTY, ...(JSON.parse(raw) as State) } : EMPTY;
+    const saved = raw ? { ...EMPTY, ...(JSON.parse(raw) as State) } : EMPTY;
+    cache = { ...saved, cloud: false, ready: true, error: null, matches: saved.matches.map(upgrade) };
   } catch {
     cache = EMPTY;
   }
   return cache;
 }
 
+/** Matches saved before Phase 2 lack the host-control fields. */
+function upgrade(m: Match): Match {
+  return {
+    ...m,
+    oddMode: m.oddMode ?? "sub",
+    pins: m.pins ?? {},
+    adjustments: m.adjustments ?? {},
+    log: m.log ?? [],
+    minutes: m.minutes ?? 60,
+    rotateEvery: m.rotateEvery ?? 10,
+    teams: m.teams ? { ...m.teams, joker: m.teams.joker ?? null } : null,
+  };
+}
+
+const notify = () => listeners.forEach((l) => l());
+
 function write(next: State) {
   cache = next;
+  if (CLOUD) return notify();
   cacheRaw = JSON.stringify(next);
   try {
     localStorage.setItem(KEY, cacheRaw);
   } catch {
     // Storage blocked or full: keep working in memory for this tab.
   }
-  listeners.forEach((l) => l());
+  notify();
+}
+
+// ---------------------------------------------------------------- cloud sync
+
+let authId: string | null = null;
+/** Each match as the database last confirmed it; changes are written as a diff against this. */
+const persisted = new Map<string, Match>();
+const dirty = new Set<string>();
+let writing = 0;
+let generation = 0;
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+let started = false;
+
+const message = (e: unknown) => (e instanceof Error && e.message ? e.message : "Something went wrong. Try again.");
+
+function refreshSoon(ms = 150) {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(refresh, ms);
+}
+
+async function refresh() {
+  // Fresh data must not overwrite changes that are still on their way out.
+  if (writing > 0 || dirty.size > 0) return refreshSoon(400);
+  const mine = ++generation;
+  try {
+    const snap = await cloud.fetchAll();
+    if (mine !== generation) return;
+    if (writing > 0 || dirty.size > 0) return refreshSoon(400);
+    authId = snap.authId;
+    persisted.clear();
+    for (const m of snap.matches) persisted.set(m.id, m);
+    write({
+      userId: snap.userId,
+      players: snap.players,
+      matches: snap.matches,
+      cloud: true,
+      signedIn: Boolean(snap.authId),
+      ready: true,
+      error: cache.error,
+    });
+  } catch (e) {
+    write({ ...cache, ready: true, error: `Could not load matches: ${message(e)}` });
+  }
+}
+
+/** Shows what went wrong and puts the screen back to what the database has. */
+function fail(e: unknown) {
+  dirty.clear();
+  write({ ...cache, error: message(e) });
+  refreshSoon(0);
+}
+
+/** Runs one write; a refresh follows so the screen ends up on the saved truth. */
+function send(work: Promise<unknown>) {
+  writing++;
+  work.then(
+    () => {
+      writing--;
+      refreshSoon();
+    },
+    (e) => {
+      writing--;
+      fail(e);
+    },
+  );
+}
+
+function markDirty(matchId: string) {
+  dirty.add(matchId);
+  clearTimeout(flushTimer);
+  // A short pause gathers a burst (a dragged slider) into one write.
+  flushTimer = setTimeout(flush, 250);
+}
+
+function flush() {
+  if (writing > 0) {
+    flushTimer = setTimeout(flush, 200);
+    return;
+  }
+  const ids = [...dirty];
+  dirty.clear();
+  send(
+    (async () => {
+      for (const id of ids) {
+        const before = persisted.get(id);
+        const after = cache.matches.find((m) => m.id === id);
+        if (!before || !after) continue;
+        await cloud.syncMatch(before, after);
+        persisted.set(id, after);
+      }
+    })(),
+  );
+}
+
+function startCloud() {
+  if (started) return;
+  started = true;
+  cloud.watch(() => refreshSoon());
+  refresh();
 }
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
+  if (CLOUD) {
+    startCloud();
+    return () => {
+      listeners.delete(listener);
+    };
+  }
   const onStorage = (e: StorageEvent) => {
     if (e.key === KEY || e.key === null) listener();
   };
@@ -68,21 +215,59 @@ export function useStore(): State {
   return useSyncExternalStore(subscribe, read, () => EMPTY);
 }
 
-/** False during server render and hydration, true once localStorage is readable. */
+/** False during server render and hydration, and until the data has loaded. */
 export function useHydrated(): boolean {
-  return useSyncExternalStore(
+  const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
     () => false,
   );
+  return useStore().ready && mounted;
 }
 
-const uid = () => Math.random().toString(36).slice(2, 10);
+// The database wants real uuids; local matches keep short ids for tidy links.
+const uid = () => (CLOUD ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10));
+const logId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : undefined);
 const code = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
-function updateMatch(id: string, fn: (m: Match) => Match) {
+/**
+ * Applies a change to one match. In cloud mode the change shows at once and is
+ * saved in the background; pass `save: false` when a database function does
+ * the real work and this is only the instant preview.
+ */
+function updateMatch(id: string, fn: (m: Match, players: Record<string, Player>) => Match, save = true) {
   const s = read();
-  write({ ...s, matches: s.matches.map((m) => (m.id === id ? fn(m) : m)) });
+  const before = s.matches.find((m) => m.id === id);
+  if (!before) return;
+  const after = fn(before, s.players);
+  if (after === before) return;
+  write({ ...s, matches: s.matches.map((m) => (m === before ? after : m)) });
+  if (CLOUD && save) markDirty(id);
+}
+
+const LOG_LIMIT = 80;
+const logged = (m: Match, action: LogEntry["action"], detail: string): Match => ({
+  ...m,
+  log: [{ id: logId(), at: Date.now(), action, detail }, ...m.log].slice(0, LOG_LIMIT),
+});
+
+const ZONE_NAMES: Record<Zone | "joker", string> = { a: "Yellow bibs", b: "Pink bibs", subs: "the subs", joker: "joker" };
+
+function zoneOf(t: Teams, id: string): Zone | "joker" | null {
+  if (t.a.includes(id)) return "a";
+  if (t.b.includes(id)) return "b";
+  if (t.subs.includes(id)) return "subs";
+  return t.joker === id ? "joker" : null;
+}
+
+/** Draft teams and pins only make sense for the squad they were made from. */
+function squadChanged(m: Match): Match {
+  const here = new Set(m.participants.filter((p) => p.status === "joined").map((p) => p.userId));
+  return {
+    ...m,
+    teams: null,
+    pins: Object.fromEntries(Object.entries(m.pins).filter(([id]) => here.has(id))),
+  };
 }
 
 /** Moves waitlisted players into free places, oldest first. */
@@ -99,6 +284,13 @@ export const actions = {
   saveProfile(profile: Omit<Player, "id">, id?: string): string {
     const s = read();
     const playerId = id ?? s.userId ?? uid();
+    if (CLOUD) {
+      if (!authId) {
+        write({ ...s, error: "Sign in before saving your profile." });
+        return "";
+      }
+      send(cloud.saveProfile({ ...profile, id: playerId }, authId));
+    }
     write({
       ...s,
       userId: s.userId ?? playerId,
@@ -107,16 +299,24 @@ export const actions = {
     return playerId;
   },
 
+  /** Local mode only: switch between the profiles made in this browser. */
   signIn(id: string) {
     const s = read();
-    if (s.players[id]) write({ ...s, userId: id });
+    if (!CLOUD && s.players[id]) write({ ...s, userId: id });
   },
 
   signOut() {
-    write({ ...read(), userId: null });
+    if (CLOUD) send(cloud.supabase().auth.signOut());
+    write({ ...read(), userId: null, signedIn: false });
   },
 
-  createMatch(input: Omit<Match, "id" | "hostId" | "inviteCode" | "status" | "participants" | "teams">): string {
+  clearError() {
+    write({ ...read(), error: null });
+  },
+
+  createMatch(
+    input: Pick<Match, "title" | "venue" | "datetime" | "perSide" | "maxPlayers" | "minPlayers" | "fee" | "visibility" | "oddMode">,
+  ): string {
     const s = read();
     if (!s.userId) throw new Error("Create a profile first");
     const match: Match = {
@@ -127,8 +327,14 @@ export const actions = {
       status: "open",
       participants: [{ userId: s.userId, status: "joined", joinedAt: Date.now() }],
       teams: null,
+      pins: {},
+      adjustments: {},
+      log: [],
+      minutes: 60,
+      rotateEvery: 10,
     };
     write({ ...s, matches: [...s.matches, match] });
+    if (CLOUD) send(cloud.insertMatch(match).then(() => persisted.set(match.id, match)));
     return match.id;
   },
 
@@ -137,12 +343,11 @@ export const actions = {
       if (m.status !== "open" || m.participants.some((p) => p.userId === userId)) return m;
       const joined = m.participants.filter((p) => p.status === "joined").length;
       const status = joined < m.maxPlayers ? "joined" : "waitlist";
-      return {
-        ...m,
-        teams: status === "joined" ? null : m.teams,
-        participants: [...m.participants, { userId, status, joinedAt: Date.now() }],
-      };
-    });
+      const next: Match = { ...m, participants: [...m.participants, { userId, status, joinedAt: Date.now() }] };
+      return status === "joined" ? squadChanged(next) : next;
+    }, false);
+    // The database decides who got the last place when two people join at once.
+    if (CLOUD) send(cloud.rpc.join(matchId));
   },
 
   leave(matchId: string, userId: string) {
@@ -150,12 +355,25 @@ export const actions = {
       if (m.status !== "open") return m;
       const next = promote({ ...m, participants: m.participants.filter((p) => p.userId !== userId) });
       // The squad changed, so any draft teams are out of date.
-      return { ...next, teams: null };
+      return squadChanged(next);
+    }, false);
+    if (CLOUD) send(cloud.rpc.leave(matchId));
+  },
+
+  /** Host only: takes a player out of the match and promotes the waitlist. */
+  removePlayer(matchId: string, userId: string) {
+    updateMatch(matchId, (m, players) => {
+      if (m.status !== "open" || userId === m.hostId) return m;
+      const adjustments = { ...m.adjustments };
+      delete adjustments[userId];
+      const next = promote({ ...m, adjustments, participants: m.participants.filter((p) => p.userId !== userId) });
+      return logged(squadChanged(next), "remove", `Removed ${players[userId]?.name ?? "a player"} from the match`);
     });
   },
 
   /** Adds sample players so a host can try team generation without a full squad. */
   addSamplePlayers(matchId: string, count: number) {
+    if (CLOUD) return send(cloud.rpc.addSamplePlayers(matchId, count));
     const s = read();
     const match = s.matches.find((m) => m.id === matchId);
     if (!match || match.status !== "open") return;
@@ -174,23 +392,149 @@ export const actions = {
       ...s,
       players,
       matches: s.matches.map((m) =>
-        m.id === matchId ? { ...m, participants: [...m.participants, ...added], teams: null } : m,
+        m.id === matchId ? squadChanged({ ...m, participants: [...m.participants, ...added] }) : m,
       ),
     });
   },
 
+  /** Stores a split from the balancer. */
   setTeams(matchId: string, teams: Omit<Teams, "version">) {
-    updateMatch(matchId, (m) =>
-      m.status === "open" ? { ...m, teams: { ...teams, version: (m.teams?.version ?? 0) + 1 } } : m,
-    );
+    updateMatch(matchId, (m) => {
+      if (m.status !== "open") return m;
+      const pinned = Object.keys(m.pins).length;
+      const detail = m.teams
+        ? `Shuffled the teams${pinned ? `, keeping ${pinned} pinned` : ""}`
+        : `Generated teams, ${teams.a.length} v ${teams.b.length}`;
+      return logged(
+        { ...m, teams: { ...teams, version: (m.teams?.version ?? 0) + 1 } },
+        m.teams ? "shuffle" : "generate",
+        detail,
+      );
+    });
+  },
+
+  /** Moves one player to a team or to the subs. */
+  movePlayer(matchId: string, playerId: string, to: Zone) {
+    updateMatch(matchId, (m, players) => {
+      const t = m.teams;
+      if (m.status !== "open" || !t) return m;
+      const from = zoneOf(t, playerId);
+      if (!from || from === to) return m;
+      const without = (ids: string[]) => ids.filter((id) => id !== playerId);
+      const teams: Teams = {
+        a: without(t.a),
+        b: without(t.b),
+        subs: without(t.subs),
+        joker: t.joker === playerId ? null : t.joker,
+        version: t.version + 1,
+      };
+      teams[to] = [...teams[to], playerId];
+      const pins = { ...m.pins };
+      if (pins[playerId]) {
+        if (to === "subs") delete pins[playerId];
+        else pins[playerId] = to;
+      }
+      return logged(
+        { ...m, teams, pins },
+        "move",
+        `Moved ${players[playerId]?.name ?? "a player"} from ${ZONE_NAMES[from]} to ${ZONE_NAMES[to]}`,
+      );
+    });
+  },
+
+  /** Two players trade places, wherever they are. */
+  swapPlayers(matchId: string, first: string, second: string) {
+    updateMatch(matchId, (m, players) => {
+      const t = m.teams;
+      if (m.status !== "open" || !t || first === second) return m;
+      const za = zoneOf(t, first);
+      const zb = zoneOf(t, second);
+      if (!za || !zb || za === zb) return m;
+      const trade = (id: string) => (id === first ? second : id === second ? first : id);
+      const teams: Teams = {
+        a: t.a.map(trade),
+        b: t.b.map(trade),
+        subs: t.subs.map(trade),
+        joker: t.joker ? trade(t.joker) : null,
+        version: t.version + 1,
+      };
+      const pins = { ...m.pins };
+      for (const [id, zone] of [[first, zb], [second, za]] as const) {
+        if (!pins[id]) continue;
+        if (zone === "a" || zone === "b") pins[id] = zone;
+        else delete pins[id];
+      }
+      const name = (id: string) => players[id]?.name ?? "a player";
+      return logged(
+        { ...m, teams, pins },
+        "swap",
+        `Swapped ${name(first)} (${ZONE_NAMES[za]}) with ${name(second)} (${ZONE_NAMES[zb]})`,
+      );
+    });
+  },
+
+  /** Pins a player to the team they are on, or releases them. */
+  togglePin(matchId: string, playerId: string) {
+    updateMatch(matchId, (m, players) => {
+      if (m.status !== "open" || !m.teams) return m;
+      const zone = zoneOf(m.teams, playerId);
+      const pins = { ...m.pins };
+      const name = players[playerId]?.name ?? "a player";
+      if (pins[playerId]) {
+        delete pins[playerId];
+        return logged({ ...m, pins }, "pin", `Unpinned ${name}`);
+      }
+      if (zone !== "a" && zone !== "b") return m;
+      pins[playerId] = zone;
+      return logged({ ...m, pins }, "pin", `Pinned ${name} to ${ZONE_NAMES[zone]}`);
+    });
+  },
+
+  /** The host's rating for one player in this match; null puts the profile rating back. */
+  adjustRating(matchId: string, playerId: string, adjustment: Adjustment | null) {
+    updateMatch(matchId, (m, players) => {
+      const player = players[playerId];
+      if (m.status !== "open" || !player) return m;
+      const adjustments = { ...m.adjustments };
+      if (adjustment) adjustments[playerId] = adjustment;
+      else delete adjustments[playerId];
+      const after = Math.round(ovr(withAdjustment(player, adjustment ?? undefined)));
+      const next = { ...m, adjustments };
+      const detail = adjustment
+        ? `Rated ${player.name} ${after} for this match (profile says ${Math.round(ovr(player))})`
+        : `Reset ${player.name} to their profile rating of ${after}`;
+      // Dragging a slider fires many changes; keep one log line per player per burst.
+      const last = m.log[0];
+      if (last?.action === "rating" && last.detail.includes(` ${player.name} `) && Date.now() - last.at < 20_000) {
+        return { ...next, log: [{ ...last, at: Date.now(), detail }, ...m.log.slice(1)] };
+      }
+      return logged(next, "rating", detail);
+    });
+  },
+
+  setOddMode(matchId: string, oddMode: OddMode) {
+    updateMatch(matchId, (m) => {
+      if (m.status !== "open" || m.oddMode === oddMode) return m;
+      const names: Record<OddMode, string> = { sub: "rolling sub", uneven: "uneven teams", joker: "joker" };
+      // The old split was built for the other mode.
+      return logged({ ...m, oddMode, teams: null }, "mode", `Odd-player rule set to ${names[oddMode]}`);
+    });
+  },
+
+  setRotation(matchId: string, minutes: number, rotateEvery: number) {
+    updateMatch(matchId, (m) => ({ ...m, minutes, rotateEvery }));
   },
 
   lock(matchId: string) {
-    updateMatch(matchId, (m) => (m.status === "open" && m.teams ? { ...m, status: "locked" } : m));
+    updateMatch(matchId, (m) =>
+      m.status === "open" && m.teams ? logged({ ...m, status: "locked" }, "lock", "Locked the teams") : m,
+    );
   },
 
   unlock(matchId: string) {
-    updateMatch(matchId, (m) => (m.status === "locked" ? { ...m, status: "open" } : m));
+    updateMatch(matchId, (m) =>
+      m.status === "locked" ? logged({ ...m, status: "open" }, "lock", "Unlocked the teams") : m,
+    );
   },
 
   cancel(matchId: string) {

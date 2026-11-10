@@ -1,4 +1,4 @@
-import { strengthGap, summarize } from "@/lib/domain/balance";
+import { compareTeams } from "@/lib/domain/balance";
 import type { Player } from "@/lib/domain/types";
 
 export const TEAM_NAMES = { a: "Yellow bibs", b: "Pink bibs" } as const;
@@ -21,21 +21,21 @@ function Row({ label, a, b }: { label: string; a: number; b: number }) {
   );
 }
 
-export function BalanceMeter({ a, b }: { a: Player[]; b: Player[] }) {
-  const sa = summarize(a);
-  const sb = summarize(b);
-  const gap = strengthGap(sa, sb);
+/**
+ * Both teams side by side. `fix` names what the viewer can do about an
+ * unfair split ("try another shuffle"), and is left out for people who can't.
+ */
+export function BalanceMeter({ a, b, fix }: { a: Player[]; b: Player[]; fix?: string }) {
+  const { a: sa, b: sb, gap, extra } = compareTeams(a, b);
   const verdict =
-    gap.leader === null
-      ? "Dead level"
-      : `${TEAM_NAMES[gap.leader]} are ${gap.pct.toFixed(1)}% stronger`;
+    gap.leader === null ? "Dead level" : `${TEAM_NAMES[gap.leader]} are ${gap.pct.toFixed(1)}% stronger`;
   const uneven = gap.pct >= 5;
 
   return (
     <div>
       <p className={`mb-3 font-display text-xl font-semibold ${uneven ? "text-warn" : ""}`} aria-live="polite">
         {verdict}
-        {uneven ? " — try another shuffle" : ""}
+        {uneven && fix ? ` — ${fix}` : ""}
       </p>
       <div className="space-y-2.5">
         <Row label="Overall strength" a={sa.strength} b={sb.strength} />
@@ -43,6 +43,13 @@ export function BalanceMeter({ a, b }: { a: Player[]; b: Player[] }) {
         <Row label="Defence" a={sa.defense} b={sb.defense} />
         <Row label="Stamina" a={sa.stamina} b={sb.stamina} />
       </div>
+      {extra ? (
+        <p className="field-hint mt-4">
+          {sa.size} v {sb.size}. {TEAM_NAMES[extra.side]} have{" "}
+          {extra.players === 1 ? "an extra player" : `${extra.players} extra players`}, counted here as{" "}
+          {Math.round(extra.factor * 100)}% of an average player, so level bars mean a fair game.
+        </p>
+      ) : null}
     </div>
   );
 }

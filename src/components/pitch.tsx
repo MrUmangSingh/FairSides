@@ -6,15 +6,17 @@ interface Placed {
   player: Player;
   left: number;
   top: number;
-  team: "a" | "b";
+  team: "a" | "b" | "joker";
   keeper: boolean;
 }
+
+const DISC = { a: "bg-bib-a", b: "bg-bib-b", joker: "bg-[#7fd8ff]" } as const;
 
 /**
  * Top-down pitch. Yellow bibs defend the top goal, pink bibs the bottom.
  * Tokens keep a stable DOM order so they glide to their new spot on shuffle.
  */
-export function Pitch({ a, b, label }: { a: Player[]; b: Player[]; label: string }) {
+export function Pitch({ a, b, joker, label }: { a: Player[]; b: Player[]; joker?: Player | null; label: string }) {
   const placed: Placed[] = [
     ...formation(a).map((s) => ({
       player: s.player,
@@ -30,6 +32,8 @@ export function Pitch({ a, b, label }: { a: Player[]; b: Player[]; label: string
       team: "b" as const,
       keeper: s.keeper,
     })),
+    // The joker plays for both sides, so they stand on the centre spot.
+    ...(joker ? [{ player: joker, left: 50, top: 50, team: "joker" as const, keeper: false }] : []),
   ].sort((p, q) => (p.player.id < q.player.id ? -1 : 1));
 
   const perSide = Math.max(a.length, b.length);
@@ -49,7 +53,7 @@ export function Pitch({ a, b, label }: { a: Player[]; b: Player[]; label: string
       {placed.map(({ player, left, top, team, keeper }) => (
         <div key={player.id} className="pitch-token" style={{ left: `${left}%`, top: `${top}%` }}>
           <span
-            className={`pitch-disc ${team === "a" ? "bg-bib-a" : "bg-bib-b"} ${
+            className={`pitch-disc ${DISC[team]} ${
               keeper ? "outline-2 outline-offset-2 outline-chalk" : ""
             }`}
           >

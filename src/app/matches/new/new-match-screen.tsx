@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { NeedsProfile } from "@/components/needs-profile";
+import { ODD_MODES, type OddMode } from "@/lib/domain/types";
 import { actions, useHydrated, useStore } from "@/lib/store";
 
 const MIN_SIDE = 3;
@@ -21,6 +22,7 @@ export function NewMatchScreen() {
   const [maxPlayers, setMaxPlayers] = useState<number | null>(null);
   const [fee, setFee] = useState(0);
   const [visibility, setVisibility] = useState<"public" | "private">("public");
+  const [oddMode, setOddMode] = useState<OddMode>("sub");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   if (!hydrated) return <div className="mx-auto max-w-2xl px-5 py-10" aria-busy="true" />;
@@ -48,6 +50,7 @@ export function NewMatchScreen() {
       minPlayers: perSide * 2,
       fee,
       visibility,
+      oddMode,
     });
     router.push(`/matches/${id}`);
   }
@@ -175,6 +178,21 @@ export function NewMatchScreen() {
               Only people with the link
             </label>
           </div>
+        </div>
+
+        <div>
+          <span className="field-label" id="odd-label">
+            If the numbers are odd
+          </span>
+          <div className="choice" role="radiogroup" aria-labelledby="odd-label">
+            {(Object.keys(ODD_MODES) as OddMode[]).map((mode) => (
+              <label key={mode}>
+                <input type="radio" name="odd" checked={oddMode === mode} onChange={() => setOddMode(mode)} />
+                {ODD_MODES[mode].label}
+              </label>
+            ))}
+          </div>
+          <p className="field-hint">{ODD_MODES[oddMode].hint} You can change this later.</p>
         </div>
 
         <button type="submit" className="btn">

@@ -20,6 +20,10 @@ export type ViewInput = View | ((aspect: number) => View);
 export interface Pitch3DProps {
   a: Player[];
   b: Player[];
+  /** Neutral player, shown on the centre spot. */
+  joker?: Player | null;
+  /** Subs wait along the near touchline. */
+  subs?: Player[];
   label: string;
   view: ViewInput;
   /** Let the visitor drag to look around. */
@@ -37,7 +41,7 @@ const W = 6.8;
 const MARGIN = 0.45;
 const SLAB = 0.85;
 const FOV = 30;
-const BIB = { a: "#f5d547", b: "#ff5c9a" } as const;
+const BIB = { a: "#f5d547", b: "#ff5c9a", joker: "#7fd8ff", sub: "#93a4a8" } as const;
 
 function speckle(g: CanvasRenderingContext2D, w: number, h: number, count: number, size: number) {
   for (let i = 0; i < count; i++) {
@@ -231,7 +235,7 @@ function Goal({ side }: { side: -1 | 1 }) {
 
 interface Placed {
   player: Player;
-  team: "a" | "b";
+  team: keyof typeof BIB;
   keeper: boolean;
   x: number;
   z: number;
@@ -415,7 +419,9 @@ function hasWebGL() {
   }
 }
 
-export default function Pitch3DScene({ a, b, label, view, drag = false, parallax = false, shift, className }: Pitch3DProps) {
+const NO_SUBS: Player[] = [];
+
+export default function Pitch3DScene({ a, b, joker = null, subs = NO_SUBS, label, view, drag = false, parallax = false, shift, className }: Pitch3DProps) {
   const [supported] = useState(hasWebGL);
   const [still] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [visible, setVisible] = useState(true);
@@ -448,14 +454,22 @@ export default function Pitch3DScene({ a, b, label, view, drag = false, parallax
         x: s * (L / 2 - 0.38 - (spot.y / 100) * depth),
         z: -s * (spot.x / 100 - 0.5) * spread,
       }));
-    return [...side(a, "a", -1), ...side(b, "b", 1)].sort((p, q) => (p.player.id < q.player.id ? -1 : 1));
-  }, [a, b]);
+    const extras: Placed[] = subs.map((player, i) => ({
+      player,
+      team: "sub",
+      keeper: false,
+      x: (i - (subs.length - 1) / 2) * Math.min(1.1, (L - 2) / Math.max(1, subs.length)),
+      z: W / 2 + 0.2,
+    }));
+    if (joker) extras.push({ player: joker, team: "joker", keeper: false, x: 0, z: 0 });
+    return [...side(a, "a", -1), ...side(b, "b", 1), ...extras].sort((p, q) => (p.player.id < q.player.id ? -1 : 1));
+  }, [a, b, joker, subs]);
 
   if (!supported) {
     return (
       <div className={`grid place-items-center p-4 ${className ?? ""}`}>
         <div className="h-full max-h-full" style={{ aspectRatio: "2 / 3" }}>
-          <Pitch a={a} b={b} label={label} />
+          <Pitch a={a} b={b} joker={joker} label={label} />
         </div>
       </div>
     );
@@ -519,7 +533,7 @@ export default function Pitch3DScene({ a, b, label, view, drag = false, parallax
         <Goal side={-1} />
         <Goal side={1} />
         {placed.map((spot) => (
-          <Figure key={spot.player.id} spot={spot} size={size} still={still} />
+          <Figure key={spot.player.id} spot={spot} size={spot.team === "sub" ? size * 0.82 : size} still={still} />
         ))}
         {still ? null : <Sparkles count={70} scale={[15, 4.5, 11]} position={[0, 2, 0]} size={2.2} speed={0.25} opacity={0.45} color="#bfffe2" />}
         <Rig view={view} parallax={parallax} shift={shift} offset={offset} still={still} />
