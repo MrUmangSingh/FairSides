@@ -62,7 +62,7 @@ Authentication → Sign In / Providers:
   schedule, remove a player.
 - **Brought forward from Phase 3 (done):** dark cinematic design, 3D hero with a scroll-driven
   camera, 3D ground for the team view (joker on the centre spot, subs on the touchline), player
-  card with a radar chart. Card image export is still to do.
+  card with a radar chart and a PNG export from the profile page.
 - **Referee (added on request, not in the plan):** one player per match can volunteer to referee
   instead of playing (a squad member gives up their place; the host always plays). The referee
   view at `/matches/<id>/referee` has a match clock, the score, goals with or without a named
