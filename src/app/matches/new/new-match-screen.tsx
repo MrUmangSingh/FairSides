@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Field, SideStepper, placesHint } from "@/components/form-bits";
 import { NeedsProfile } from "@/components/needs-profile";
+import { markCreated } from "@/components/share-match";
 import { MAX_PLACES } from "@/lib/domain/squad";
 import { ODD_MODES, type OddMode } from "@/lib/domain/types";
 import { actions, useHydrated, useStore } from "@/lib/store";
@@ -52,6 +53,7 @@ export function NewMatchScreen() {
       visibility,
       oddMode,
     });
+    markCreated(id);
     router.push(`/matches/${id}`);
   }
 

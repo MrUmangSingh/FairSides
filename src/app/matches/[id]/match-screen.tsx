@@ -7,6 +7,7 @@ import { BalanceMeter, TEAM_NAMES } from "@/components/balance-meter";
 import { MatchSettings } from "@/components/match-settings";
 import { RatingPanel, RatingTag } from "@/components/rating-panel";
 import { RefereeSection } from "@/components/referee-bits";
+import { ShareMatch } from "@/components/share-match";
 import { TeamEditor } from "@/components/team-editor";
 import { TeamStage } from "@/components/team-stage";
 import { balanceTeams } from "@/lib/domain/balance";
@@ -79,6 +80,8 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
           <JoinControl match={match} userId={userId} mine={mine?.status} placesLeft={placesLeft} />
         )}
       </header>
+
+      {cancelled ? null : <ShareMatch match={match} placesLeft={placesLeft} />}
 
       <PlaceCounter joined={joined.length} max={match.maxPlayers} needed={match.minPlayers} />
 
