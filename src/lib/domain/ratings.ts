@@ -1,4 +1,4 @@
-import { STAT_KEYS, type Adjustment, type Player, type Position, type Stats } from "./types";
+import { STAT_KEYS, type Adjustment, type Player, type Position, type RatingBook, type Stats } from "./types";
 
 const mean = (...xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
 
@@ -51,4 +51,30 @@ export function shiftToOvr(p: Player, target: number): Adjustment {
     gk = clampStat(gk + delta);
   }
   return { stats, gk };
+}
+
+/** Same stats and keeping, whatever the `once` flag says. */
+export const sameRating = (a: Adjustment, b: Adjustment) =>
+  a.gk === b.gk && STAT_KEYS.every((k) => a.stats[k] === b.stats[k]);
+
+/** The part of an adjustment that goes into the host's saved ratings. */
+export const toSaved = (a: Adjustment): Adjustment => ({ stats: { ...a.stats }, gk: a.gk });
+
+/**
+ * Players in this match whose saved rating isn't in use here: they have none for
+ * this match, or one that came from an older saved rating. One-off ratings stay.
+ */
+export function savedNotUsed(ids: string[], adjustments: Record<string, Adjustment>, book: RatingBook): string[] {
+  return ids.filter((id) => {
+    const saved = book[id];
+    const here = adjustments[id];
+    return saved && (!here || (!here.once && !sameRating(here, saved)));
+  });
+}
+
+/** Fills in the host's saved rating for every listed player who has none for this match yet. */
+export function withSaved(ids: string[], adjustments: Record<string, Adjustment>, book: RatingBook) {
+  const missing = ids.filter((id) => book[id] && !adjustments[id]);
+  if (missing.length === 0) return adjustments;
+  return { ...adjustments, ...Object.fromEntries(missing.map((id) => [id, toSaved(book[id])])) };
 }

@@ -16,9 +16,10 @@ import {
 import { useState } from "react";
 import { bestSwap, compareTeams, type SwapSuggestion } from "@/lib/domain/balance";
 import { ovr } from "@/lib/domain/ratings";
-import type { Player, Side, Teams, Zone } from "@/lib/domain/types";
+import type { Adjustment, Player, Side, Teams, Zone } from "@/lib/domain/types";
 import { actions } from "@/lib/store";
 import { TEAM_NAMES } from "./balance-meter";
+import { RatingTag } from "./rating-panel";
 
 const ZONES: Record<Zone, { name: string; swatch: string; glow: string }> = {
   a: { name: TEAM_NAMES.a, swatch: "bg-bib-a", glow: "rgb(245 213 71 / 0.55)" },
@@ -48,11 +49,11 @@ interface Props {
   /** Players as rated for this match. */
   lookup: (ids: string[]) => Player[];
   pins: Record<string, Side>;
-  adjusted: Set<string>;
+  adjustments: Record<string, Adjustment>;
 }
 
 /** The host's draft: drag players between sides, tap two to swap, pin, or ask for the best swap. */
-export function TeamEditor({ matchId, teams, lookup, pins, adjusted }: Props) {
+export function TeamEditor({ matchId, teams, lookup, pins, adjustments }: Props) {
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     // A short hold starts a drag on touch screens, so a plain swipe still scrolls the page.
@@ -104,7 +105,7 @@ export function TeamEditor({ matchId, teams, lookup, pins, adjusted }: Props) {
       hinted={hinted.has(p.id)}
       pinned={Boolean(pins[p.id])}
       canPin={zone === "a" || zone === "b"}
-      adjusted={adjusted.has(p.id)}
+      adjustment={adjustments[p.id]}
       onTap={() => tap(p.id)}
       onPin={() => actions.togglePin(matchId, p.id)}
     />
@@ -271,7 +272,7 @@ function PlayerRow({
   hinted,
   pinned,
   canPin,
-  adjusted,
+  adjustment,
   onTap,
   onPin,
 }: {
@@ -280,7 +281,7 @@ function PlayerRow({
   hinted: boolean;
   pinned: boolean;
   canPin: boolean;
-  adjusted: boolean;
+  adjustment?: Adjustment;
   onTap: () => void;
   onPin: () => void;
 }) {
@@ -315,7 +316,7 @@ function PlayerRow({
         <span className="w-9 font-display text-xl font-bold tabular-nums">{Math.round(ovr(player))}</span>
         <span className="min-w-0 flex-1 truncate">
           {player.name}
-          {adjusted ? <span className="text-warn"> (adjusted)</span> : null}
+          <RatingTag adjustment={adjustment} host />
         </span>
         <span className="text-sm text-chalk-dim">
           {player.primaryPos}

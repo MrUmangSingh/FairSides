@@ -80,11 +80,16 @@ export interface Teams {
   version: number;
 }
 
-/** The host's rating for one player, for this match only. */
+/** The host's rating for one player in one match. */
 export interface Adjustment {
   stats: Stats;
   gk: number;
+  /** Set for a one-off change: the host's saved rating for the player stays as it was. */
+  once?: boolean;
 }
+
+/** A host's saved ratings, by player id. They follow the players into that host's next matches. */
+export type RatingBook = Record<string, Adjustment>;
 
 export interface LogEntry {
   /** Stable id, so an entry reworded in place is the same row in the database. */

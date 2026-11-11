@@ -73,6 +73,13 @@ Authentication → Sign In / Providers:
   total places) while the teams are open, and the name, venue, kick-off, fee and who can join at
   any time. Fewer places send the latest to join to the front of the waitlist (never the host);
   more places move the waitlist up. Each change is listed in the host changes.
+- **Host ratings (added on request):** a rating the host sets in a match is saved as that host's
+  rating for the player. When the player joins another match the same host runs, they start on
+  it instead of their profile rating. Only that host can see or change it (`host_ratings`,
+  `supabase/migrations/0004_host_ratings.sql`), so other hosts' matches are unaffected and the
+  player can't undo it. "Only this match" keeps a change to one match; "Use their own" forgets
+  the saved rating. The host can also rate players after locking the teams, to rate how they played.
+  `npm run db:test -- --pending` tries unapplied migrations inside the rolled-back test.
 - **Not done from the plan's Phase 2 list:** dragging players in the 3D view (the editor below it
   does the moving), transferring the host role.
 - **Next, Phase 4:** advanced mode, match results, peer ratings, Verified badge, reliability score.

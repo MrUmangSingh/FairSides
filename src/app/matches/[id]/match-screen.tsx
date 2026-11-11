@@ -5,21 +5,21 @@ import Link from "next/link";
 import { use, useState } from "react";
 import { BalanceMeter, TEAM_NAMES } from "@/components/balance-meter";
 import { MatchSettings } from "@/components/match-settings";
-import { RatingPanel } from "@/components/rating-panel";
+import { RatingPanel, RatingTag } from "@/components/rating-panel";
 import { RefereeSection } from "@/components/referee-bits";
 import { TeamEditor } from "@/components/team-editor";
 import { TeamStage } from "@/components/team-stage";
 import { balanceTeams } from "@/lib/domain/balance";
 import { ovr, withAdjustment } from "@/lib/domain/ratings";
 import { rotationSchedule } from "@/lib/domain/rotation";
-import { ODD_MODES, type LogEntry, type Match, type OddMode, type Player } from "@/lib/domain/types";
+import { ODD_MODES, type Adjustment, type LogEntry, type Match, type OddMode, type Player } from "@/lib/domain/types";
 import { formatFee, formatSize, formatWhen } from "@/lib/format";
-import { actions, joinedOf, useHydrated, useStore, waitlistOf } from "@/lib/store";
+import { actions, canRate, joinedOf, useHydrated, useStore, waitlistOf } from "@/lib/store";
 
 export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const hydrated = useHydrated();
-  const { userId, players, matches, cloud } = useStore();
+  const { userId, players, matches, cloud, books } = useStore();
 
   if (!hydrated) return <PageLoader label="Loading match" />;
 
@@ -46,7 +46,6 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
   const joinedIds = joinedOf(match).map((p) => p.userId);
   const joined = lookup(joinedIds);
   const waiting = lookup(waitlistOf(match).map((p) => p.userId));
-  const adjusted = new Set(Object.keys(match.adjustments));
   const isHost = match.hostId === userId;
   const mine = match.participants.find((p) => p.userId === userId);
   const locked = match.status === "locked";
@@ -55,7 +54,7 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
   const teams = match.teams && (locked || isHost) ? match.teams : null;
   const editing = Boolean(teams) && isHost && !locked && !cancelled;
   const joker = teams?.joker ? (lookup([teams.joker])[0] ?? null) : null;
-  const tags = { meId: userId, hostId: match.hostId, adjusted };
+  const tags = { meId: userId, hostId: match.hostId, adjustments: match.adjustments, hostView: isHost };
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-8">
@@ -134,7 +133,7 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
             </div>
             <div>
               {editing ? (
-                <TeamEditor matchId={match.id} teams={teams} lookup={lookup} pins={match.pins} adjusted={adjusted} />
+                <TeamEditor matchId={match.id} teams={teams} lookup={lookup} pins={match.pins} adjustments={match.adjustments} />
               ) : (
                 <div className="grid gap-8 sm:grid-cols-2">
                   <TeamList title={TEAM_NAMES.a} swatch="bg-bib-a" players={lookup(teams.a)} {...tags} />
@@ -173,8 +172,14 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
           </section>
         ) : null}
 
-        {isHost && match.status === "open" && joined.length > 0 ? (
-          <RatingPanel matchId={match.id} players={profiles(joinedIds)} adjustments={match.adjustments} />
+        {isHost && canRate(match) && joined.length > 0 ? (
+          <RatingPanel
+            matchId={match.id}
+            players={profiles(joinedIds)}
+            adjustments={match.adjustments}
+            book={books[match.hostId] ?? {}}
+            locked={locked}
+          />
         ) : null}
 
         {match.log.length > 0 ? <ChangeLog log={match.log} isHost={isHost} /> : null}
@@ -473,7 +478,8 @@ function TeamList({
   players,
   meId,
   hostId,
-  adjusted,
+  adjustments,
+  hostView,
   ordered,
   empty,
   onRemove,
@@ -483,7 +489,9 @@ function TeamList({
   players: Player[];
   meId: string | null;
   hostId: string;
-  adjusted: Set<string>;
+  adjustments: Record<string, Adjustment>;
+  /** The host is looking: tags say whether a rating is their saved one or a one-off. */
+  hostView: boolean;
   ordered?: boolean;
   empty?: string;
   onRemove?: (p: Player) => void;
@@ -506,7 +514,7 @@ function TeamList({
               {p.id === meId ? <span className="text-chalk-dim"> (you)</span> : null}
               {p.id === hostId ? <span className="text-chalk-dim"> (host)</span> : null}
               {p.sample ? <span className="text-chalk-dim"> (sample)</span> : null}
-              {adjusted.has(p.id) ? <span className="text-warn"> (host adjusted)</span> : null}
+              <RatingTag adjustment={adjustments[p.id]} host={hostView} />
             </span>
             <span className="text-sm text-chalk-dim">
               {p.primaryPos}
