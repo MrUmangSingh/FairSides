@@ -1,8 +1,9 @@
 "use client";
 
+import { toPng } from "html-to-image";
 import { PageLoader } from "@/components/page-loader";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AccountPanel } from "@/components/account";
 import { PlayerCard } from "@/components/player-card";
 import { SignIn } from "@/components/sign-in";
@@ -47,9 +48,40 @@ export function ProfileScreen() {
 }
 
 function CardReveal({ me, onEdit }: { me: Player; onEdit: () => void }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+
+  async function saveCardImage() {
+    const card = cardRef.current?.querySelector<HTMLElement>(".player-card");
+    if (!card || saving) return;
+    setSaving(true);
+    // Capture the settled card: no hover tilt, no entrance flip.
+    const previous = card.style.cssText;
+    card.style.setProperty("--rx", "0deg");
+    card.style.setProperty("--ry", "0deg");
+    card.style.animation = "none";
+    try {
+      const dataUrl = await toPng(card, { pixelRatio: 3 });
+      const slug = me.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const link = document.createElement("a");
+      link.download = `fairsides-card-${slug || "player"}.png`;
+      link.href = dataUrl;
+      link.click();
+      setSaveFailed(false);
+    } catch {
+      setSaveFailed(true);
+    } finally {
+      card.style.cssText = previous;
+      // Leave the entrance animation off: switching it back on would replay the flip.
+      card.style.animation = "none";
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="mx-auto grid max-w-5xl items-center gap-12 px-5 py-12 md:grid-cols-[20rem_1fr] lg:py-20">
-      <div className="card-tilt card-reveal mx-auto w-full max-w-[20rem]">
+      <div ref={cardRef} className="card-tilt card-reveal mx-auto w-full max-w-[20rem]">
         <PlayerCard player={me} />
       </div>
       <div role="status">
@@ -65,6 +97,10 @@ function CardReveal({ me, onEdit }: { me: Player; onEdit: () => void }) {
           <button type="button" className="btn btn-line" onClick={onEdit}>
             Edit profile
           </button>
+          <button type="button" className="btn btn-line" onClick={saveCardImage} disabled={saving}>
+            {saving ? "Saving image…" : "Save card as image"}
+          </button>
+          {saveFailed ? <p role="alert" className="field-hint w-full">Couldn&apos;t save the image. Try again.</p> : null}
         </div>
       </div>
     </div>
