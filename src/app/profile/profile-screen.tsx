@@ -72,7 +72,10 @@ function CardReveal({ me, onEdit }: { me: Player; onEdit: () => void }) {
     } catch {
       setSaveFailed(true);
     } finally {
-      card.style.cssText = previous;      setSaving(false);
+      card.style.cssText = previous;
+      // Leave the entrance animation off: switching it back on would replay the flip.
+      card.style.animation = "none";
+      setSaving(false);
     }
   }
 
