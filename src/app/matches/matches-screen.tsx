@@ -1,5 +1,6 @@
 "use client";
 
+import { PageLoader } from "@/components/page-loader";
 import Link from "next/link";
 import { useState } from "react";
 import type { Match } from "@/lib/domain/types";
@@ -50,7 +51,9 @@ export function MatchesScreen() {
       </div>
 
       {!hydrated ? (
-        <div className="mt-8" aria-busy="true" />
+        <div className="mt-8">
+          <PageLoader label="Loading matches" compact />
+        </div>
       ) : visible.length === 0 ? (
         <div className="chalk-rule mt-8 pt-8">
           <p className="font-display text-2xl font-semibold">

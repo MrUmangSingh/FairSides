@@ -486,6 +486,111 @@
   transition: background-color 400ms ease;
 }
 
+/* Page loader: the two bibs circle each other in depth under a floodlight. */
+.loader-orbit {
+  position: relative;
+  width: 7rem;
+  height: 4rem;
+}
+.loader-glow {
+  position: absolute;
+  inset: -2.5rem -3rem;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(70 240 160 / 0.22), transparent 70%);
+  animation: loader-breathe 2.4s ease-in-out infinite;
+}
+.loader-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: -0.75rem 0 0 -0.75rem;
+  border-radius: 50%;
+  box-shadow:
+    inset -4px -5px 8px rgb(0 0 0 / 0.35),
+    inset 3px 3px 6px rgb(255 255 255 / 0.45),
+    0 0 22px currentColor;
+  animation: loader-orbit 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.loader-dot.bg-bib-a {
+  color: rgb(245 213 71 / 0.55);
+}
+.loader-dot-b {
+  color: rgb(255 92 154 / 0.55);
+  animation-delay: -0.8s;
+}
+.loader-label {
+  animation: loader-breathe 2.4s ease-in-out infinite;
+}
+@keyframes loader-orbit {
+  0% {
+    transform: translateX(-2.6rem) scale(0.9);
+    z-index: 1;
+  }
+  25% {
+    transform: translateX(0) translateY(0.55rem) scale(1.25);
+    z-index: 2;
+  }
+  50% {
+    transform: translateX(2.6rem) scale(0.9);
+    z-index: 1;
+  }
+  75% {
+    transform: translateX(0) translateY(-0.55rem) scale(0.6);
+    z-index: 0;
+    opacity: 0.65;
+  }
+  100% {
+    transform: translateX(-2.6rem) scale(0.9);
+    z-index: 1;
+  }
+}
+@keyframes loader-breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+.loader-compact .loader-orbit {
+  transform: scale(0.72);
+}
+
+/* Button spinner: a chalk ring with a glowing arc. */
+.spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: spin 700ms linear infinite;
+  vertical-align: -0.15em;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-glow,
+  .loader-dot,
+  .loader-label {
+    animation: none !important;
+  }
+  /* A spinner that doesn't turn still needs to read as "working": slow it right down instead. */
+  .spinner {
+    animation-duration: 2.4s !important;
+  }
+  .loader-dot {
+    transform: translateX(-0.9rem);
+  }
+  .loader-dot-b {
+    transform: translateX(0.9rem);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageLoader, Spinner } from "@/components/page-loader";
 import { signInMethods, supabase, type SignInMethods } from "@/lib/cloud";
+
+type Method = "google" | "guest" | "email";
 
 /** Shown before the profile form when accounts are on and nobody is signed in. */
 export function SignIn() {
   const [methods, setMethods] = useState<SignInMethods | null>(null);
   const [email, setEmail] = useState("");
-  const [busy, setBusy] = useState(false);
+  // Which sign-in is in flight, so only that button shows a spinner.
+  const [busy, setBusy] = useState<Method | null>(null);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
 
@@ -23,11 +27,12 @@ export function SignIn() {
 
   const back = () => `${window.location.origin}/profile`;
 
-  async function run(work: () => Promise<{ error: { message: string } | null }>, done?: () => void) {
-    setBusy(true);
+  async function run(which: Method, work: () => Promise<{ error: { message: string } | null }>, done?: () => void) {
+    setBusy(which);
     setError("");
     const { error: failed } = await work();
-    setBusy(false);
+    // A successful Google sign-in navigates away, so keep its spinner until the page leaves.
+    if (failed || which !== "google") setBusy(null);
     if (failed) setError(failed.message);
     else done?.();
   }
@@ -46,7 +51,7 @@ export function SignIn() {
 
       <div className="panel p-6 sm:p-8" aria-busy={!methods}>
         {!methods ? (
-          <p className="text-chalk-dim">Checking how you can sign in…</p>
+          <PageLoader label="Checking sign-in options" compact />
         ) : none ? (
           <p role="alert" className="text-warn">
             No sign-in method is switched on for this site yet. In the Supabase dashboard, open Authentication,
@@ -58,12 +63,15 @@ export function SignIn() {
               <button
                 type="button"
                 className="btn w-full"
-                disabled={busy}
+                disabled={busy !== null}
                 onClick={() =>
-                  run(() => supabase().auth.signInWithOAuth({ provider: "google", options: { redirectTo: back() } }))
+                  run("google", () =>
+                    supabase().auth.signInWithOAuth({ provider: "google", options: { redirectTo: back() } }),
+                  )
                 }
               >
-                Continue with Google
+                {busy === "google" ? <Spinner /> : null}
+                {busy === "google" ? "Opening Google…" : "Continue with Google"}
               </button>
             ) : null}
             {methods.guest ? (
@@ -71,10 +79,11 @@ export function SignIn() {
                 <button
                   type="button"
                   className={`btn w-full ${methods.google ? "btn-line" : ""}`}
-                  disabled={busy}
-                  onClick={() => run(() => supabase().auth.signInAnonymously())}
+                  disabled={busy !== null}
+                  onClick={() => run("guest", () => supabase().auth.signInAnonymously())}
                 >
-                  Continue as a guest
+                  {busy === "guest" ? <Spinner /> : null}
+                  {busy === "guest" ? "Setting you up…" : "Continue as a guest"}
                 </button>
                 <p className="field-hint">No account needed. A guest profile stays on this device only.</p>
               </div>
@@ -95,6 +104,7 @@ export function SignIn() {
                       return;
                     }
                     run(
+                      "email",
                       () => supabase().auth.signInWithOtp({ email, options: { emailRedirectTo: back() } }),
                       () => setSent(true),
                     );
@@ -114,8 +124,9 @@ export function SignIn() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                     />
-                    <button type="submit" className={`btn ${methods.google || methods.guest ? "btn-line" : ""}`} disabled={busy}>
-                      Send link
+                    <button type="submit" className={`btn ${methods.google || methods.guest ? "btn-line" : ""}`} disabled={busy !== null}>
+                      {busy === "email" ? <Spinner /> : null}
+                      {busy === "email" ? "Sending…" : "Send link"}
                     </button>
                   </div>
                 </form>

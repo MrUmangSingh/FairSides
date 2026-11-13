@@ -1,5 +1,7 @@
 // Exercises the row-level security rules and database functions as two pretend users.
 // Everything runs in one transaction that is rolled back, so nothing is left behind.
+// With --pending, migrations not yet applied to the database are run inside that
+// transaction first, so a new migration can be tested before it goes live.
 const root = require("path").join(__dirname, "..");
 const pg = require(root + "/node_modules/pg");
 const fs = require("fs");
@@ -36,6 +38,16 @@ let pass = 0, failN = 0;
 
   await c.query("begin");
   try {
+    if (process.argv.includes("--pending")) {
+      const dir = root + "/supabase/migrations";
+      const done = new Set((await c.query("select name from public._migrations")).rows.map((x) => x.name));
+      for (const name of fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
+        if (done.has(name)) continue;
+        await c.query(fs.readFileSync(dir + "/" + name, "utf8"));
+        console.log(`(trying ${name} inside the test; it is rolled back with everything else)`);
+      }
+    }
+
     await c.query(`insert into auth.users (id, aud, role, email) values ($1,'authenticated','authenticated','rls-a@example.invalid'), ($2,'authenticated','authenticated','rls-b@example.invalid'), ($3,'authenticated','authenticated','rls-c@example.invalid')`, [U1, U2, U3]);
 
     await as(U1);
@@ -215,6 +227,51 @@ let pass = 0, failN = 0;
     expect("and gives up their place to do it", r.rows?.[0].ref === P3 && r.rows[0].n === 0, r);
     r = await run(`select clear_referee($1)`, [M]);
     expect("the referee can step down", r.ok, r);
+
+    // ------------------------------------------------------------ host ratings
+    const rated = (gk) => [stats, gk];
+    const adjGk = async (pid) => (await run(`select adjustments->$2->>'gk' gk from matches where id=$1`, [M, pid])).rows?.[0]?.gk ?? null;
+    await as(U1);
+    r = await run(`insert into host_ratings (host_id, player_id, stats, gk) values ($1,$2,$3,$4)`, [P1, P2, ...rated(41)]);
+    expect("a host saves their rating of a player", r.ok, r);
+    r = await run(`insert into host_ratings (host_id, player_id, stats, gk) values ($1,$2,$3,$4)`, [P2, P3, ...rated(41)]);
+    expect("nobody saves ratings in another host's name", !r.ok, r);
+    r = await run(`select apply_host_ratings($1)`, [M]);
+    expect("the fill-in helper is not callable", !r.ok, r);
+
+    await as(U2);
+    r = await run(`select * from host_ratings`);
+    expect("a player cannot see what hosts rated them", r.ok && r.rows.length === 0, r);
+    r = await run(`update host_ratings set gk=99 where player_id=$1`, [P2]);
+    expect("a player cannot change a host's rating of them", r.ok && r.count === 0, r);
+    r = await run(`delete from host_ratings where player_id=$1`, [P2]);
+    expect("a player cannot delete a host's rating of them", r.ok && r.count === 0, r);
+    r = await run(`select join_match($1) s`, [M]);
+    expect("player joins again", r.ok, r);
+    expect("they start on the host's saved rating", (await adjGk(P2)) === "41", await adjGk(P2));
+    r = await run(`select leave_match($1)`, [M]);
+    expect("leaving takes their match rating away", (await adjGk(P2)) === null, await adjGk(P2));
+    await run(`select join_match($1)`, [M]);
+    expect("and rejoining brings the saved rating back", (await adjGk(P2)) === "41", await adjGk(P2));
+
+    await as(U1);
+    r = await run(`update matches set adjustments = adjustments || jsonb_build_object($2::text, jsonb_build_object('stats', $3::jsonb, 'gk', 50, 'once', true)) where id=$1`, [M, P3, stats]);
+    r = await run(`insert into host_ratings (host_id, player_id, stats, gk) values ($1,$2,$3,$4)`, [P1, P3, ...rated(60)]);
+    await as(U3);
+    r = await run(`select join_match($1)`, [M]);
+    expect("a rating the host already set in this match wins over the saved one", (await adjGk(P3)) === "50", await adjGk(P3));
+
+    await as(U2);
+    r = await run(`insert into matches (id, host_id, title, venue, datetime, per_side, max_players, min_players, invite_code) values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2',$1,'T2','V','2026-12-02T20:00',3,6,6,'XYZ789')`, [P2]);
+    expect("another host creates a match", r.ok, r);
+    await as(U3);
+    r = await run(`select join_match('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2')`);
+    r = await run(`select adjustments from matches where id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2'`);
+    expect("one host's ratings don't follow players into another host's match", r.ok && Object.keys(r.rows[0].adjustments).length === 0, r);
+
+    await as(U1);
+    r = await run(`delete from host_ratings where host_id=$1 and player_id=$2`, [P1, P2]);
+    expect("a host forgets their rating of a player", r.ok && r.count === 1, r);
   } finally {
     await c.query("rollback");
     const left = await c.query("select (select count(*) from auth.users where email like 'rls-%@example.invalid')::int u, (select count(*) from public.matches where id = $1)::int m", [M]);

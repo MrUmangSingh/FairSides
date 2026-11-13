@@ -2,7 +2,7 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { STOPPED } from "./domain/referee";
-import type { Clock, LogEntry, Match, MatchEvent, Participant, Player, Teams } from "./domain/types";
+import type { Adjustment, Clock, LogEntry, Match, MatchEvent, Participant, Player, RatingBook, Teams } from "./domain/types";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -37,6 +37,8 @@ export interface Snapshot {
   userId: string | null;
   players: Record<string, Player>;
   matches: Match[];
+  /** Saved ratings by host id. The database only returns the signed-in host's own. */
+  books: Record<string, RatingBook>;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows arrive untyped from PostgREST */
@@ -116,13 +118,14 @@ export async function fetchAll(): Promise<Snapshot> {
   const { data: auth } = await sb.auth.getSession();
   const user = auth.session?.user ?? null;
   const authId = user?.id ?? null;
-  const [players, matches, participants, teams, log, events] = await Promise.all([
+  const [players, matches, participants, teams, log, events, ratings] = await Promise.all([
     sb.from("players").select("*"),
     sb.from("matches").select("*").order("created_at"),
     sb.from("match_participants").select("*"),
     sb.from("match_teams").select("*"),
     sb.from("match_log").select("*").order("at", { ascending: false }).limit(2000),
     sb.from("match_events").select("*").order("at"),
+    sb.from("host_ratings").select("host_id, player_id, stats, gk"),
   ]);
 
   const group = <T,>(rows: Row[], make: (r: Row) => T) => {
@@ -151,6 +154,8 @@ export async function fetchAll(): Promise<Snapshot> {
   }));
   const drafts = new Map((check(teams) as Row[]).map((r) => [r.match_id as string, r]));
   const playerRows = check(players) as Row[];
+  const books: Record<string, RatingBook> = {};
+  for (const r of check(ratings) as Row[]) (books[r.host_id] ??= {})[r.player_id] = { stats: r.stats, gk: r.gk };
 
   const google = Boolean(user?.identities?.some((i) => i.provider === "google"));
   return {
@@ -165,6 +170,7 @@ export async function fetchAll(): Promise<Snapshot> {
       : null,
     userId: authId ? (playerRows.find((r) => r.owner === authId)?.id ?? null) : null,
     players: Object.fromEntries(playerRows.map((r) => [r.id, toPlayer(r)])),
+    books,
     matches: (check(matches) as Row[]).map((r) => {
       const draft = drafts.get(r.id);
       const t = draft?.teams as Teams | null | undefined;
@@ -200,6 +206,21 @@ export async function fetchAll(): Promise<Snapshot> {
 
 export async function saveProfile(player: Player, authId: string) {
   check(await supabase().from("players").upsert(playerRow(player, authId), { onConflict: "id" }));
+}
+
+/** Saves the host's rating for one player, or forgets it when `rating` is null. */
+export async function saveRating(hostId: string, playerId: string, rating: Adjustment | null) {
+  const table = supabase().from("host_ratings");
+  if (!rating) {
+    check(await table.delete().eq("host_id", hostId).eq("player_id", playerId));
+    return;
+  }
+  check(
+    await table.upsert(
+      { host_id: hostId, player_id: playerId, stats: rating.stats, gk: rating.gk, updated_at: new Date().toISOString() },
+      { onConflict: "host_id,player_id" },
+    ),
+  );
 }
 
 export async function insertMatch(m: Match) {

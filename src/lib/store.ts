@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 import * as cloud from "./cloud";
 import { SAMPLE_PLAYERS } from "./domain/samples";
-import { ovr, withAdjustment } from "./domain/ratings";
+import { ovr, sameRating, savedNotUsed, toSaved, withAdjustment, withSaved } from "./domain/ratings";
 import { STOPPED, matchMinute, pauseClock, startClock, summarise, tallyOf } from "./domain/referee";
 import { MAX_PLACES, MAX_SIDE, MIN_SIDE, fitSquad } from "./domain/squad";
 import { formatFee, formatList, formatWhen } from "./format";
@@ -15,6 +15,7 @@ import type {
   OddMode,
   Participant,
   Player,
+  RatingBook,
   Side,
   Teams,
   Zone,
@@ -39,6 +40,11 @@ export interface State {
   userId: string | null;
   players: Record<string, Player>;
   matches: Match[];
+  /**
+   * Hosts' saved ratings by host id, then player id. In cloud mode only the
+   * signed-in host's own; locally, every profile made in this browser.
+   */
+  books: Record<string, RatingBook>;
   /** True when accounts and shared matches are on. */
   cloud: boolean;
   /** Cloud only: someone is signed in (they may not have made a profile yet). */
@@ -55,6 +61,7 @@ const EMPTY: State = {
   userId: null,
   players: {},
   matches: [],
+  books: {},
   cloud: CLOUD,
   signedIn: false,
   account: null,
@@ -78,7 +85,8 @@ function read(): State {
   cacheRaw = raw;
   try {
     const saved = raw ? { ...EMPTY, ...(JSON.parse(raw) as State) } : EMPTY;
-    cache = { ...saved, cloud: false, ready: true, error: null, matches: saved.matches.map(upgrade) };
+    const matches = saved.matches.map(upgrade);
+    cache = { ...saved, cloud: false, ready: true, error: null, matches, books: saved.books ?? booksFrom(matches) };
   } catch {
     cache = EMPTY;
   }
@@ -100,6 +108,16 @@ function upgrade(m: Match): Match {
     clock: m.clock ?? STOPPED,
     events: m.events ?? [],
   };
+}
+
+/** Saved ratings for data from before they existed: what each host last set, latest match winning. */
+function booksFrom(matches: Match[]): Record<string, RatingBook> {
+  const books: Record<string, RatingBook> = {};
+  for (const m of matches) {
+    if (m.status === "cancelled") continue;
+    for (const [id, a] of Object.entries(m.adjustments)) if (!a.once) (books[m.hostId] ??= {})[id] = toSaved(a);
+  }
+  return books;
 }
 
 const notify = () => listeners.forEach((l) => l());
@@ -135,14 +153,17 @@ function refreshSoon(ms = 150) {
   refreshTimer = setTimeout(refresh, ms);
 }
 
+/** Changes made here that haven't gone out to the database yet. */
+const unsent = () => writing > 0 || dirty.size > 0 || pendingRatings.size > 0;
+
 async function refresh() {
   // Fresh data must not overwrite changes that are still on their way out.
-  if (writing > 0 || dirty.size > 0) return refreshSoon(400);
+  if (unsent()) return refreshSoon(400);
   const mine = ++generation;
   try {
     const snap = await cloud.fetchAll();
     if (mine !== generation) return;
-    if (writing > 0 || dirty.size > 0) return refreshSoon(400);
+    if (unsent()) return refreshSoon(400);
     authId = snap.authId;
     persisted.clear();
     for (const m of snap.matches) persisted.set(m.id, m);
@@ -150,6 +171,7 @@ async function refresh() {
       userId: snap.userId,
       players: snap.players,
       matches: snap.matches,
+      books: snap.books,
       cloud: true,
       signedIn: Boolean(snap.authId),
       account: snap.account,
@@ -219,6 +241,40 @@ function flush() {
       }
     })(),
   );
+}
+
+/** Saved-rating writes waiting to go out, by player id. Sliders fire often, so they are gathered up. */
+const pendingRatings = new Map<string, { hostId: string; rating: Adjustment | null }>();
+let ratingTimer: ReturnType<typeof setTimeout> | undefined;
+
+function flushRatings() {
+  if (writing > 0) {
+    ratingTimer = setTimeout(flushRatings, 200);
+    return;
+  }
+  const jobs = [...pendingRatings];
+  pendingRatings.clear();
+  send(
+    (async () => {
+      for (const [playerId, { hostId, rating }] of jobs) await cloud.saveRating(hostId, playerId, rating);
+    })(),
+  );
+}
+
+/** Updates the host's saved rating for a player, or forgets it when `rating` is null. */
+function remember(hostId: string, playerId: string, rating: Adjustment | null) {
+  const s = read();
+  const book = s.books[hostId] ?? {};
+  const was = book[playerId];
+  if (rating ? was && sameRating(was, rating) : !was) return;
+  const next = { ...book };
+  if (rating) next[playerId] = toSaved(rating);
+  else delete next[playerId];
+  write({ ...s, books: { ...s.books, [hostId]: next } });
+  if (!CLOUD) return;
+  pendingRatings.set(playerId, { hostId, rating: rating && toSaved(rating) });
+  clearTimeout(ratingTimer);
+  ratingTimer = setTimeout(flushRatings, 400);
 }
 
 function startCloud() {
@@ -372,7 +428,8 @@ export const actions = {
       participants: [{ userId: s.userId, status: "joined", joinedAt: Date.now() }],
       teams: null,
       pins: {},
-      adjustments: {},
+      // The host starts on their own saved rating of themselves, if they have one.
+      adjustments: withSaved([s.userId], {}, s.books[s.userId] ?? {}),
       log: [],
       minutes: 60,
       rotateEvery: 10,
@@ -386,11 +443,17 @@ export const actions = {
   },
 
   join(matchId: string, userId: string) {
+    const { books } = read();
     updateMatch(matchId, (m) => {
       if (m.status !== "open" || m.refereeId === userId || m.participants.some((p) => p.userId === userId)) return m;
       const joined = m.participants.filter((p) => p.status === "joined").length;
       const status = joined < m.maxPlayers ? "joined" : "waitlist";
-      const next: Match = { ...m, participants: [...m.participants, { userId, status, joinedAt: Date.now() }] };
+      // The host's saved rating comes along. In cloud mode join_match does this, as only the host can read it.
+      const next: Match = {
+        ...m,
+        participants: [...m.participants, { userId, status, joinedAt: Date.now() }],
+        adjustments: withSaved([userId], m.adjustments, books[m.hostId] ?? {}),
+      };
       return status === "joined" ? squadChanged(next) : next;
     }, false);
     // The database decides who got the last place when two people join at once.
@@ -439,7 +502,13 @@ export const actions = {
       ...s,
       players,
       matches: s.matches.map((m) =>
-        m.id === matchId ? squadChanged({ ...m, participants: [...m.participants, ...added] }) : m,
+        m.id === matchId
+          ? squadChanged({
+              ...m,
+              participants: [...m.participants, ...added],
+              adjustments: withSaved(picks.map((p) => p.id), m.adjustments, s.books[m.hostId] ?? {}),
+            })
+          : m,
       ),
     });
   },
@@ -537,18 +606,26 @@ export const actions = {
     });
   },
 
-  /** The host's rating for one player in this match; null puts the profile rating back. */
+  /**
+   * The host's rating for one player in this match. It also becomes the host's
+   * saved rating for them, which their next matches with this host start from,
+   * unless `adjustment.once` marks it as a one-off. null puts the player back
+   * on their profile rating and forgets the saved one too.
+   */
   adjustRating(matchId: string, playerId: string, adjustment: Adjustment | null) {
+    const s = read();
+    const match = s.matches.find((m) => m.id === matchId);
+    if (!match || !canRate(match) || match.hostId !== s.userId) return;
     updateMatch(matchId, (m, players) => {
       const player = players[playerId];
-      if (m.status !== "open" || !player) return m;
+      if (!player) return m;
       const adjustments = { ...m.adjustments };
       if (adjustment) adjustments[playerId] = adjustment;
       else delete adjustments[playerId];
       const after = Math.round(ovr(withAdjustment(player, adjustment ?? undefined)));
       const next = { ...m, adjustments };
       const detail = adjustment
-        ? `Rated ${player.name} ${after} for this match (profile says ${Math.round(ovr(player))})`
+        ? `Rated ${player.name} ${after}${adjustment.once ? " for this match only" : ""} (profile says ${Math.round(ovr(player))})`
         : `Reset ${player.name} to their profile rating of ${after}`;
       // Dragging a slider fires many changes; keep one log line per player per burst.
       const last = m.log[0];
@@ -556,6 +633,22 @@ export const actions = {
         return { ...next, log: [{ ...last, at: Date.now(), detail }, ...m.log.slice(1)] };
       }
       return logged(next, "rating", detail);
+    });
+    if (!adjustment || !adjustment.once) remember(match.hostId, playerId, adjustment);
+  },
+
+  /** Host only: puts everyone in the squad on the host's saved rating where this match isn't using it. */
+  applySavedRatings(matchId: string) {
+    const s = read();
+    const book = s.books[s.userId ?? ""] ?? {};
+    updateMatch(matchId, (m, players) => {
+      if (!canRate(m) || m.hostId !== s.userId) return m;
+      const ids = savedNotUsed(joinedOf(m).map((p) => p.userId), m.adjustments, book);
+      if (ids.length === 0) return m;
+      const adjustments = { ...m.adjustments, ...Object.fromEntries(ids.map((id) => [id, toSaved(book[id])])) };
+      const names = formatList(ids.map((id) => players[id]?.name ?? "a player"));
+      const detail = `Used the host's saved ${ids.length === 1 ? "rating" : "ratings"} for ${names}`;
+      return logged({ ...m, adjustments }, "rating", detail.length > 300 ? `${detail.slice(0, 297)}...` : detail);
     });
   },
 
@@ -695,6 +788,9 @@ export const actions = {
     if (CLOUD) sendInOrder(() => cloud.removeEvent(eventId));
   },
 };
+
+/** The host rates players while the teams are open, and after locking them, to rate how people played. */
+export const canRate = (m: Match) => m.status === "open" || m.status === "locked";
 
 /** Whether this player may volunteer as referee right now (the database checks the same). */
 export function canReferee(m: Match, playerId: string): boolean {

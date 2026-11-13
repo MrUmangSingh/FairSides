@@ -1,6 +1,7 @@
 "use client";
 
 import { toPng } from "html-to-image";
+import { PageLoader } from "@/components/page-loader";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { AccountPanel } from "@/components/account";
@@ -35,7 +36,7 @@ export function ProfileScreen() {
   const hydrated = useHydrated();
   const { userId, players, cloud, signedIn } = useStore();
   const [revealed, setRevealed] = useState(false);
-  if (!hydrated) return <div className="mx-auto max-w-3xl px-5 py-10" aria-busy="true" />;
+  if (!hydrated) return <PageLoader label="Loading your profile" />;
   if (cloud && !signedIn) return <SignIn />;
 
   const me = userId ? players[userId] : null;
@@ -71,8 +72,7 @@ function CardReveal({ me, onEdit }: { me: Player; onEdit: () => void }) {
     } catch {
       setSaveFailed(true);
     } finally {
-      card.style.cssText = previous;
-      setSaving(false);
+      card.style.cssText = previous;      setSaving(false);
     }
   }
 

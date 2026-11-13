@@ -1,8 +1,17 @@
 import { attack, defense, ovr } from "./ratings";
 import type { OddMode, Player, Side, Teams } from "./types";
 
-/** Cost weights from plan §7.2. Tune from real matches later. */
-export const WEIGHTS = { strength: 1.0, attack: 0.5, defense: 0.5, stamina: 0.3, position: 5, noKeeper: 60 };
+/**
+ * Cost weights from plan §7.2. Tune from real matches later. `lopsided` is added on top
+ * of `strength` for every point of strength gap beyond STRENGTH_BAND, so attack, defense,
+ * stamina and positions only choose between splits that are already close on strength.
+ * Without it the balancer would take a split 8–10% apart over one 1% apart just to even
+ * out the attack totals.
+ */
+export const WEIGHTS = { strength: 1.0, lopsided: 4, attack: 0.5, defense: 0.5, stamina: 0.3, position: 5, noKeeper: 60 };
+
+/** Share of one team's strength that two sides may differ by before `lopsided` kicks in. */
+const STRENGTH_BAND = 0.01;
 
 /**
  * Plan §6.3: one extra player is worth about 60% of an average player in a
@@ -49,6 +58,8 @@ export function extraPlayerFactor(smallerSide: number): number {
 /** Everything the cost needs that does not change while players are swapped around. */
 interface Context {
   keepers: number;
+  /** Strength gap, in points, that costs no more than `strength` alone. */
+  band: number;
   /** Marked off the bigger team's totals for each extra body, per measure. */
   discount: { ovr: number; attack: number; defense: number; stamina: number };
 }
@@ -59,6 +70,7 @@ function context(a: Rated[], b: Rated[]): Context {
   const avg = (f: (r: Rated) => number) => (all.length ? sum(all, f) / all.length : 0);
   return {
     keepers: all.filter((r) => r.canGk).length,
+    band: STRENGTH_BAND * (sum(all, (r) => r.ovr) / 2),
     discount: {
       ovr: off * avg((r) => r.ovr),
       attack: off * avg((r) => r.attack),
@@ -72,8 +84,10 @@ function cost(a: Rated[], b: Rated[], ctx: Context): number {
   // Positive when A has more players: A's totals are marked down, so A ends up weaker per player.
   const extra = a.length - b.length;
   const d = ctx.discount;
+  const gap = Math.abs(sum(a, (r) => r.ovr) - sum(b, (r) => r.ovr) - extra * d.ovr);
   let c =
-    WEIGHTS.strength * Math.abs(sum(a, (r) => r.ovr) - sum(b, (r) => r.ovr) - extra * d.ovr) +
+    WEIGHTS.strength * gap +
+    WEIGHTS.lopsided * Math.max(0, gap - ctx.band) +
     WEIGHTS.attack * Math.abs(sum(a, (r) => r.attack) - sum(b, (r) => r.attack) - extra * d.attack) +
     WEIGHTS.defense * Math.abs(sum(a, (r) => r.defense) - sum(b, (r) => r.defense) - extra * d.defense) +
     // The smaller team gets no rest, so stamina counts double when the sides are uneven.
