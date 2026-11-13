@@ -2,8 +2,9 @@
 
 import { PageLoader } from "@/components/page-loader";
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { TEAM_NAMES } from "@/components/balance-meter";
+import { GearIcon, RefereeSettingsPanel, WhistleIcon } from "@/components/referee-settings-panel";
 import {
   BallIcon,
   CardIcon,
@@ -15,7 +16,9 @@ import {
 } from "@/components/referee-bits";
 import { clockMs, formatClock, hasStarted, isSecondYellow, sideOf, summarise, tallyOf, type Summary } from "@/lib/domain/referee";
 import type { EventKind, Match, Player, Side } from "@/lib/domain/types";
+import { useRefereeSettings, whistle } from "@/lib/referee-settings";
 import { actions, useHydrated, useStore } from "@/lib/store";
+import { unlockWhistle } from "@/lib/whistle";
 
 export function RefereeScreen({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -49,9 +52,12 @@ function RefereeDesk({ match, players }: { match: Match; players: Record<string,
   const name = (pid: string) => players[pid]?.name ?? "A player";
   const teams = match.status === "locked" ? match.teams : null;
   const [announce, setAnnounce] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const settings = useRefereeSettings();
 
   function record(kind: EventKind, side: Side | null, playerId: string | null) {
     actions.recordEvent(match.id, kind, side, playerId);
+    if (settings.onEvents) whistle("long", settings);
     const who = playerId ? name(playerId) : null;
     setAnnounce(
       kind === "goal"
@@ -63,17 +69,35 @@ function RefereeDesk({ match, players }: { match: Match; players: Record<string,
   const roster = (ids: string[]) => ids.map((pid) => players[pid]).filter(Boolean) as Player[];
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-5 sm:py-8">
+    // Browsers only allow sound after a tap; any tap here lets the half- and full-time whistles play later.
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-5 sm:py-8" onPointerDown={unlockWhistle}>
       <Link
         href={`/matches/${match.id}`}
         className="text-sm text-chalk-dim underline underline-offset-4 hover:text-chalk"
       >
         Back to the match
       </Link>
-      <h1 className="mt-3 text-3xl sm:text-4xl">Referee</h1>
+      <div className="mt-3 flex items-center gap-3">
+        <h1 className="flex-1 text-3xl sm:text-4xl">Referee</h1>
+        <button
+          type="button"
+          className="btn btn-line btn-sm gap-2"
+          aria-expanded={showSettings}
+          aria-controls="ref-settings"
+          onClick={() => setShowSettings((v) => !v)}
+        >
+          <GearIcon className="size-4" /> Settings
+        </button>
+      </div>
       <p className="mt-1 text-chalk-dim">
         {match.title}, {match.venue}
       </p>
+
+      {showSettings ? (
+        <div id="ref-settings">
+          <RefereeSettingsPanel minutes={match.minutes} onClose={() => setShowSettings(false)} />
+        </div>
+      ) : null}
 
       <MatchClock match={match} />
 
@@ -134,6 +158,32 @@ function MatchClock({ match }: { match: Match }) {
   const ms = clockMs(clock, now);
   const progress = Math.min(1, ms / (minutes * 60_000));
   const over = ms > minutes * 60_000;
+  const settings = useRefereeSettings();
+
+  // Half- and full-time whistles fire as the running clock crosses the mark,
+  // never on opening the page past it.
+  const lastMs = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = lastMs.current;
+    lastMs.current = ms;
+    if (prev === null || !clock.running || ms <= prev) return;
+    const crossed = (mark: number) => prev < mark && ms >= mark;
+    if (crossed(minutes * 60_000)) {
+      if (settings.fullTime) whistle("final", settings);
+    } else if (crossed(minutes * 30_000)) {
+      if (settings.halfTime) whistle("final", settings);
+      if (settings.pauseAtHalf) actions.clock(match.id, "pause");
+    }
+  }, [ms, clock.running, minutes, match.id, settings]);
+
+  const start = () => {
+    actions.clock(match.id, "start");
+    if (settings.onClock) whistle("short", settings);
+  };
+  const pause = () => {
+    actions.clock(match.id, "pause");
+    if (settings.onClock) whistle("double", settings);
+  };
 
   // Keep the phone's screen on while the clock runs.
   useEffect(() => {
@@ -171,11 +221,11 @@ function MatchClock({ match }: { match: Match }) {
       </div>
       <div className="mt-5 flex justify-center gap-3">
         {clock.running ? (
-          <button type="button" className="btn min-w-36" onClick={() => actions.clock(match.id, "pause")}>
+          <button type="button" className="btn min-w-36" onClick={pause}>
             Pause
           </button>
         ) : (
-          <button type="button" className="btn min-w-36" onClick={() => actions.clock(match.id, "start")}>
+          <button type="button" className="btn min-w-36" onClick={start}>
             {hasStarted(clock) ? "Resume" : "Kick off"}
           </button>
         )}
@@ -191,6 +241,14 @@ function MatchClock({ match }: { match: Match }) {
           </button>
         ) : null}
       </div>
+      {/* Tapping the whistle is a deliberate blow, so it sounds even with automatic whistles muted. */}
+      <button
+        type="button"
+        className="btn btn-line mt-3 w-full max-w-sm gap-2"
+        onClick={() => whistle("long", { ...settings, sound: true })}
+      >
+        <WhistleIcon /> Blow whistle
+      </button>
     </section>
   );
 }
