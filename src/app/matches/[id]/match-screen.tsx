@@ -185,7 +185,7 @@ export function MatchScreen({ params }: { params: Promise<{ id: string }> }) {
           />
         ) : null}
 
-        {match.log.length > 0 ? <ChangeLog log={match.log} isHost={isHost} /> : null}
+        {isHost && match.log.length > 0 ? <ChangeLog log={match.log} isHost={isHost} /> : null}
       </div>
     </div>
   );
