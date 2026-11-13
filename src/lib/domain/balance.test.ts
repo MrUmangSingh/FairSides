@@ -18,7 +18,7 @@ function seeded(seed: number) {
 describe("ovrFor", () => {
   const stats = { pace: 80, stamina: 70, shooting: 90, passing: 60, dribbling: 80, defending: 30 };
   it("weights by position", () => {
-    expect(ovrFor(stats, 40, "FWD")).toBeCloseTo(27 + 20 + 16 + 9 + 7);
+    expect(ovrFor(stats, 40, "FWD")).toBeCloseTo(25.2 + 17.6 + 16 + 8.4 + 7 + 1.8);
     expect(ovrFor(stats, 40, "GK")).toBe(40);
   });
 });
@@ -36,6 +36,15 @@ describe("balanceTeams", () => {
       expect(gap.pct).toBeLessThan(n <= 6 ? 10 : 4);
     });
   }
+
+  it("never trades a close split for a lopsided one to even out attack or defense", () => {
+    const rng = seeded(11);
+    for (let t = 0; t < 60; t++) {
+      const squad = SAMPLE_PLAYERS.toSorted(() => rng() - 0.5).slice(0, 8 + 2 * (t % 4));
+      const r = balanceTeams(squad, { perSide: squad.length / 2, rng });
+      expect(strengthGap(summarize(team(r.a)), summarize(team(r.b))).pct).toBeLessThan(4);
+    }
+  });
 
   it("sends the odd player and overflow to subs, latest joiners first", () => {
     const r = balanceTeams(SAMPLE_PLAYERS.slice(0, 13), { perSide: 5, rng: seeded(1) });
